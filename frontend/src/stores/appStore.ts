@@ -1,6 +1,31 @@
 import { create } from 'zustand';
 import type { Message, Session, BacktestResult, StrategyIR, MutationResult } from '../types';
 
+export interface SwarmTask {
+  role: string;
+  status: 'pending' | 'running' | 'completed' | 'error' | 'cancelled';
+  progress: number;
+  message: string;
+  error?: string;
+  duration?: number;
+}
+
+export interface SwarmState {
+  session_id: string;
+  query: string;
+  overall_progress: number;
+  is_complete: boolean;
+  tasks: Record<string, SwarmTask>;
+  strategy: any | null;
+  backtest_results: any | null;
+  mutation_results: any | null;
+  robustness_results: any | null;
+  mt5_code: boolean;
+  report_path: string | null;
+  final_response: string;
+  duration: number;
+}
+
 interface AppState {
   sessions: Session[];
   activeSessionId: string | null;
@@ -13,9 +38,13 @@ interface AppState {
   mutationResults: MutationResult | null;
   mt5Code: string | null;
   robustnessResults: any | null;
+  // Swarm state
+  swarmState: SwarmState | null;
+  swarmEnabled: boolean;
   connect: () => void;
   disconnect: () => void;
   sendMessage: (content: string, images?: string[]) => void;
+  sendSwarmMessage: (content: string) => void;
   newSession: () => void;
   setActiveSession: (id: string) => void;
   addMessage: (msg: Message) => void;
@@ -28,6 +57,8 @@ interface AppState {
   runRobustness: (strategy: any) => void;
   exportMT5: (strategy: any) => void;
   setProcessing: (v: boolean) => void;
+  setSwarmState: (s: SwarmState | null) => void;
+  setSwarmEnabled: (v: boolean) => void;
 }
 
 const SESSIONS_KEY = 'trading_sessions';
@@ -55,6 +86,8 @@ export const useStore = create<AppState>((set, get) => ({
   mutationResults: null,
   mt5Code: null,
   robustnessResults: null,
+  swarmState: null,
+  swarmEnabled: true, // Default to swarm mode
 
   connect: () => {
     const sid = get().activeSessionId || crypto.randomUUID();
@@ -66,6 +99,7 @@ export const useStore = create<AppState>((set, get) => ({
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+
           if (data.type === 'response') {
             const msg: Message = {
               id: crypto.randomUUID(), role: 'assistant',
@@ -78,8 +112,27 @@ export const useStore = create<AppState>((set, get) => ({
             if (data.backtest_results) set({ backtestResults: data.backtest_results });
             if (data.mt5_code) set({ mt5Code: data.mt5_code });
             set({ isProcessing: false });
+
+          } else if (data.type === 'swarm_progress') {
+            set({ swarmState: data.state, isProcessing: true });
+
+          } else if (data.type === 'swarm_complete') {
+            const msg: Message = {
+              id: crypto.randomUUID(), role: 'assistant',
+              content: data.response || '', timestamp: new Date().toISOString(),
+              strategy: data.strategy, backtestResults: data.backtest_results,
+              mt5Code: data.mt5_code,
+            };
+            get().addMessage(msg);
+            if (data.strategy) set({ currentStrategy: data.strategy });
+            if (data.backtest_results) set({ backtestResults: data.backtest_results });
+            if (data.mt5_code) set({ mt5Code: data.mt5_code });
+            if (data.state) set({ swarmState: data.state });
+            set({ isProcessing: false });
+
           } else if (data.type === 'backtest_results') {
             set({ backtestResults: data.results, isProcessing: false });
+
           } else if (data.type === 'mutation_results') {
             set({ mutationResults: data.mutations, isProcessing: false });
           }
@@ -97,35 +150,104 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   sendMessage: (content, images) => {
-    const { ws, isConnected } = get();
+    const { ws, isConnected, swarmEnabled } = get();
+
+    // Add user message
     const msg: Message = {
       id: crypto.randomUUID(), role: 'user', content, images,
       timestamp: new Date().toISOString(),
     };
     get().addMessage(msg);
-    set({ isProcessing: true });
-    if (ws && isConnected) {
-      ws.send(JSON.stringify({ type: 'chat', content, images: images || [] }));
+    set({ isProcessing: true, swarmState: null });
+
+    if (swarmEnabled) {
+      // Use swarm mode
+      if (ws && isConnected) {
+        ws.send(JSON.stringify({ type: 'swarm', content, images: images || [] }));
+      } else {
+        // Fallback: use SSE streaming via fetch
+        get().sendSwarmMessage(content);
+      }
     } else {
-      fetch('http://localhost:8000/api/chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, images: images || [] }),
-      })
-        .then(r => r.json())
-        .then(data => {
-          const responseMsg: Message = {
-            id: crypto.randomUUID(), role: 'assistant',
-            content: data.response || '', timestamp: new Date().toISOString(),
-            strategy: data.strategy, backtestResults: data.backtest_results,
-            mt5Code: data.mt5_code,
-          };
-          get().addMessage(responseMsg);
-          if (data.strategy) set({ currentStrategy: data.strategy });
-          if (data.backtest_results) set({ backtestResults: data.backtest_results });
-          if (data.mt5_code) set({ mt5Code: data.mt5_code });
-          set({ isProcessing: false });
+      // Use regular chat mode
+      if (ws && isConnected) {
+        ws.send(JSON.stringify({ type: 'chat', content, images: images || [] }));
+      } else {
+        fetch('http://localhost:8000/api/chat', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: content, images: images || [] }),
         })
-        .catch(err => { console.error('API error:', err); set({ isProcessing: false }); });
+          .then(r => r.json())
+          .then(data => {
+            const responseMsg: Message = {
+              id: crypto.randomUUID(), role: 'assistant',
+              content: data.response || '', timestamp: new Date().toISOString(),
+              strategy: data.strategy, backtestResults: data.backtest_results,
+              mt5Code: data.mt5_code,
+            };
+            get().addMessage(responseMsg);
+            if (data.strategy) set({ currentStrategy: data.strategy });
+            if (data.backtest_results) set({ backtestResults: data.backtest_results });
+            if (data.mt5_code) set({ mt5Code: data.mt5_code });
+            set({ isProcessing: false });
+          })
+          .catch(err => { console.error('API error:', err); set({ isProcessing: false }); });
+      }
+    }
+  },
+
+  sendSwarmMessage: async (content) => {
+    // SSE streaming fallback when WebSocket is not available
+    try {
+      const response = await fetch('http://localhost:8000/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: content }),
+      });
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(line.slice(6));
+                if (event.type === 'progress' && event.state) {
+                  set({ swarmState: event.state, isProcessing: true });
+                } else if (event.type === 'complete') {
+                  const msg: Message = {
+                    id: crypto.randomUUID(), role: 'assistant',
+                    content: event.response || '', timestamp: new Date().toISOString(),
+                    strategy: event.strategy, backtestResults: event.backtest_results,
+                    mt5Code: event.mt5_code,
+                  };
+                  get().addMessage(msg);
+                  if (event.strategy) set({ currentStrategy: event.strategy });
+                  if (event.backtest_results) set({ backtestResults: event.backtest_results });
+                  if (event.mt5_code) set({ mt5Code: event.mt5_code });
+                  if (event.state) set({ swarmState: event.state });
+                  set({ isProcessing: false });
+                }
+              } catch (e) {
+                console.error('SSE parse error:', e);
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('SSE error:', err);
+      set({ isProcessing: false });
     }
   },
 
@@ -139,7 +261,11 @@ export const useStore = create<AppState>((set, get) => ({
     };
     const sessions = [session, ...get().sessions];
     saveSessions(sessions);
-    set({ sessions, activeSessionId: sid, messages: [], currentStrategy: null, backtestResults: null, mutationResults: null, mt5Code: null });
+    set({
+      sessions, activeSessionId: sid, messages: [],
+      currentStrategy: null, backtestResults: null, mutationResults: null,
+      mt5Code: null, swarmState: null,
+    });
     get().disconnect();
     get().connect();
   },
@@ -150,6 +276,8 @@ export const useStore = create<AppState>((set, get) => ({
   setMutationResults: (r) => set({ mutationResults: r }),
   setMT5Code: (code) => set({ mt5Code: code }),
   setProcessing: (v) => set({ isProcessing: v }),
+  setSwarmState: (s) => set({ swarmState: s }),
+  setSwarmEnabled: (v) => set({ swarmEnabled: v }),
 
   runBacktest: (strategy) => {
     const { ws, isConnected } = get();

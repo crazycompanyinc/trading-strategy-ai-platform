@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore } from '../stores/appStore';
+import { SwarmDashboard } from './SwarmDashboard';
 import type { Message } from '../types';
 
 const TypingIndicator = () => (
@@ -40,7 +41,7 @@ export const ChatPanel = () => {
   const [images, setImages] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { messages, isProcessing, sendMessage } = useStore();
+  const { messages, isProcessing, sendMessage, swarmEnabled, setSwarmEnabled } = useStore();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -74,12 +75,33 @@ export const ChatPanel = () => {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Swarm mode toggle */}
+      <div className="px-4 py-2 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-muted">Mode:</span>
+          <button
+            onClick={() => setSwarmEnabled(!swarmEnabled)}
+            className={`text-xs px-2 py-1 rounded ${swarmEnabled ? 'bg-accent-blue/20 text-accent-blue' : 'bg-bg-secondary text-text-muted'}`}
+          >
+            {swarmEnabled ? '🤖 Swarm' : '💬 Chat'}
+          </button>
+        </div>
+        <span className="text-xs text-text-muted">
+          {swarmEnabled ? 'Parallel agents execute research, backtest, evolution, MT5' : 'Single agent conversation'}
+        </span>
+      </div>
+
+      {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary">
             <div className="text-6xl mb-4">📈</div>
             <h2 className="text-xl font-semibold text-accent-blue mb-2">Trading Strategy AI</h2>
-            <p className="text-center max-w-md">Describe your trading idea in natural language. I'll research it, build a strategy, backtest it, and generate MT5 code.</p>
+            <p className="text-center max-w-md">
+              {swarmEnabled
+                ? 'Describe your trading idea. The swarm will research, build, backtest, evolve, and generate MT5 code in parallel.'
+                : 'Describe your trading idea in natural language. I\'ll help you build and test strategies.'}
+            </p>
             <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
               {[
                 { title: '📊 Trend Following', desc: 'EMA crossover + RSI filter', input: 'Create a trend following strategy using EMA crossover on EURUSD H1 with RSI filter' },
@@ -100,6 +122,11 @@ export const ChatPanel = () => {
         {isProcessing && <TypingIndicator />}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Swarm dashboard - shown while processing */}
+      {isProcessing && <SwarmDashboard />}
+
+      {/* Image previews */}
       {images.length > 0 && (
         <div className="px-4 pb-2 flex gap-2 flex-wrap">
           {images.map((img, i) => (
@@ -110,16 +137,20 @@ export const ChatPanel = () => {
           ))}
         </div>
       )}
+
+      {/* Input area */}
       <div className="border-t border-border p-4">
         <div className="flex gap-2 items-end">
           <button onClick={() => fileInputRef.current?.click()}
             className="p-2 rounded-lg bg-bg-secondary border border-border hover:border-accent-blue/50 transition-colors text-text-secondary" title="Upload image">📎</button>
           <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
           <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
-            placeholder="Describe your trading idea..."
+            placeholder={swarmEnabled ? "Describe your trading idea — the swarm will execute everything..." : "Describe your trading idea..."}
             className="flex-1 bg-bg-secondary border border-border rounded-lg p-3 text-sm resize-none focus:outline-none focus:border-accent-blue/50 min-h-[44px] max-h-[120px]" rows={1} />
           <button onClick={handleSend} disabled={!input.trim() && images.length === 0}
-            className="p-3 rounded-lg bg-accent-blue text-white font-medium hover:bg-accent-blue/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">Send</button>
+            className="p-3 rounded-lg bg-accent-blue text-white font-medium hover:bg-accent-blue/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+            {swarmEnabled ? '🚀' : 'Send'}
+          </button>
         </div>
       </div>
     </div>

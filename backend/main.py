@@ -1,13 +1,14 @@
 """
 Trading Strategy AI Platform - Main Application
-FastAPI backend with WebSocket support for real-time chat
+FastAPI backend with WebSocket and SSE streaming for real-time agent progress.
 """
 import os
 import uuid
 import json
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Load environment from Hermes .env file
 def load_env():
@@ -32,14 +33,14 @@ def load_env():
 
 load_env()
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
 from agent.trading_agent import TradingAgent
+from agent.swarm_orchestrator import SwarmOrchestrator, AgentRole
 from strategy.parser import StrategyParser
 from strategy.models import StrategyIR
 from backtester.engine import BacktestEngine
@@ -52,7 +53,7 @@ from reports.generator import ReportGenerator
 app = FastAPI(
     title="Trading Strategy AI Platform",
     description="AI-powered trading strategy research via natural language",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -66,6 +67,7 @@ app.add_middleware(
 # ─── Global state ──────────────────────────────────────────────────────────────
 
 agent = TradingAgent()
+swarm_orchestrator = SwarmOrchestrator()
 parser = StrategyParser()
 backtester = BacktestEngine()
 mutator = GeneticMutator()
@@ -83,7 +85,7 @@ sessions: Dict[str, dict] = {}
 class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
-    images: Optional[List[str]] = None  # base64-encoded images
+    images: Optional[List[str]] = None
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -91,6 +93,8 @@ class ChatResponse(BaseModel):
     strategy: Optional[dict] = None
     backtest_results: Optional[dict] = None
     mt5_code: Optional[str] = None
+    mutation_results: Optional[dict] = None
+    robustness_results: Optional[dict] = None
 
 class BacktestRequest(BaseModel):
     strategy: dict
@@ -118,26 +122,26 @@ class RobustnessRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "app": "Trading Strategy AI Platform", "version": "1.0.0"}
+    return {"status": "ok", "app": "Trading Strategy AI Platform", "version": "2.0.0"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Process a natural language trading idea."""
+    """Process a natural language trading idea with full tool execution."""
     sid = request.session_id or str(uuid.uuid4())
 
     if sid not in sessions:
         sessions[sid] = {
             "id": sid,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "history": [],
             "current_strategy": None
         }
 
-    # Process via agent
+    # Process via agent (with real tool execution)
     result = await agent.process_message(
         message=request.message,
         images=request.images or [],
@@ -148,12 +152,12 @@ async def chat(request: ChatRequest):
     sessions[sid]["history"].append({
         "role": "user",
         "content": request.message,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
     sessions[sid]["history"].append({
         "role": "assistant",
         "content": result.get("response", ""),
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     if result.get("strategy"):
@@ -164,11 +168,161 @@ async def chat(request: ChatRequest):
         response=result.get("response", ""),
         strategy=result.get("strategy"),
         backtest_results=result.get("backtest_results"),
-        mt5_code=result.get("mt5_code")
+        mt5_code=result.get("mt5_code"),
+        mutation_results=result.get("mutation_results"),
+        robustness_results=result.get("robustness_results"),
     )
 
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    SSE streaming endpoint for real-time agent progress.
+    Streams swarm state updates as Server-Sent Events.
+    """
+    sid = request.session_id or str(uuid.uuid4())
+
+    if sid not in sessions:
+        sessions[sid] = {
+            "id": sid,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "history": [],
+            "current_strategy": None
+        }
+
+    async def event_stream():
+        # Send initial event
+        yield f"data: {json.dumps({'type': 'start', 'session_id': sid})}\n\n"
+
+        async def on_progress(state: dict):
+            """Callback that sends progress updates via SSE."""
+            # This runs inside the swarm — we put events in a queue
+            pass
+
+        # Use a queue to bridge sync callback to async SSE
+        progress_queue: asyncio.Queue = asyncio.Queue()
+
+        async def queued_progress(state: dict):
+            await progress_queue.put(state)
+
+        # Run swarm in background
+        swarm_task = asyncio.create_task(
+            swarm_orchestrator.run_swarm(
+                session_id=sid,
+                query=request.message,
+                progress_callback=queued_progress,
+            )
+        )
+
+        # Stream progress updates
+        last_state = None
+        while not swarm_task.done():
+            try:
+                state = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
+                last_state = state
+                yield f"data: {json.dumps({'type': 'progress', 'state': state})}\n\n"
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                continue
+
+        # Drain remaining events
+        while not progress_queue.empty():
+            try:
+                state = progress_queue.get_nowait()
+                last_state = state
+                yield f"data: {json.dumps({'type': 'progress', 'state': state})}\n\n"
+            except asyncio.QueueEmpty:
+                break
+
+        # Get final result
+        try:
+            final_state = await swarm_task
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            return
+
+        # Save to session
+        sessions[sid]["history"].append({
+            "role": "user",
+            "content": request.message,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        sessions[sid]["history"].append({
+            "role": "assistant",
+            "content": final_state.final_response,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        if final_state.strategy:
+            sessions[sid]["current_strategy"] = final_state.strategy
+
+        # Send final result
+        final_data = json.dumps({
+            "type": "complete",
+            "session_id": sid,
+            "response": final_state.final_response,
+            "strategy": final_state.strategy,
+            "backtest_results": final_state.backtest_results,
+            "mutation_results": final_state.mutation_results,
+            "robustness_results": final_state.robustness_results,
+            "mt5_code": final_state.mt5_code,
+            "state": final_state.to_dict(),
+        })
+        yield f"data: {final_data}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+@app.post("/api/swarm/run")
+async def run_swarm(request: ChatRequest):
+    """Run the full swarm orchestrator (non-streaming, returns when done)."""
+    sid = request.session_id or str(uuid.uuid4())
+
+    if sid not in sessions:
+        sessions[sid] = {
+            "id": sid,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "history": [],
+            "current_strategy": None
+        }
+
+    state = await swarm_orchestrator.run_swarm(
+        session_id=sid,
+        query=request.message,
+    )
+
+    sessions[sid]["history"].append({
+        "role": "user",
+        "content": request.message,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    sessions[sid]["history"].append({
+        "role": "assistant",
+        "content": state.final_response,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    if state.strategy:
+        sessions[sid]["current_strategy"] = state.strategy
+
+    return {
+        "session_id": sid,
+        "response": state.final_response,
+        "strategy": state.strategy,
+        "backtest_results": state.backtest_results,
+        "mutation_results": state.mutation_results,
+        "robustness_results": state.robustness_results,
+        "mt5_code": state.mt5_code,
+        "state": state.to_dict(),
+    }
+
 @app.post("/api/backtest")
-async def run_backtest(request: BacktestRequest, background_tasks: BackgroundTasks):
+async def run_backtest(request: BacktestRequest):
     """Execute a backtest for a given strategy."""
     try:
         result = backtester.run(
@@ -237,7 +391,6 @@ async def upload_image(file: UploadFile = File(...)):
     """Upload an image for analysis."""
     try:
         contents = await file.read()
-        # Save temporarily
         img_id = str(uuid.uuid4())
         img_path = f"/tmp/trading_imgs/{img_id}_{file.filename}"
         os.makedirs("/tmp/trading_imgs", exist_ok=True)
@@ -271,7 +424,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if session_id not in sessions:
         sessions[session_id] = {
             "id": session_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "history": [],
             "current_strategy": None
         }
@@ -283,6 +436,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             msg_type = message.get("type", "chat")
 
             if msg_type == "chat":
+                # Use the agent with real tool execution
                 result = await agent.process_message(
                     message=message.get("content", ""),
                     images=message.get("images", []),
@@ -295,7 +449,36 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "strategy": result.get("strategy"),
                     "backtest_results": result.get("backtest_results"),
                     "mt5_code": result.get("mt5_code"),
+                    "mutation_results": result.get("mutation_results"),
+                    "robustness_results": result.get("robustness_results"),
                     "done": True
+                })
+
+            elif msg_type == "swarm":
+                # Run full swarm with real-time progress via WebSocket
+                query = message.get("content", "")
+
+                async def ws_progress(state: dict):
+                    await websocket.send_json({
+                        "type": "swarm_progress",
+                        "state": state,
+                    })
+
+                state = await swarm_orchestrator.run_swarm(
+                    session_id=session_id,
+                    query=query,
+                    progress_callback=ws_progress,
+                )
+
+                await websocket.send_json({
+                    "type": "swarm_complete",
+                    "response": state.final_response,
+                    "strategy": state.strategy,
+                    "backtest_results": state.backtest_results,
+                    "mutation_results": state.mutation_results,
+                    "robustness_results": state.robustness_results,
+                    "mt5_code": state.mt5_code,
+                    "state": state.to_dict(),
                 })
 
             elif msg_type == "backtest":
@@ -333,4 +516,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 # ─── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    import sys
+    is_reload = "--reload" in sys.argv
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=is_reload, workers=1)
