@@ -1,6 +1,6 @@
 """
 Strategy Parser - Converts natural language + images into Strategy IR.
-Uses LLM for NLP understanding and image analysis.
+Supports both classical indicators AND ICT concepts (FVG, Order Block, BOS, CHoCH, etc.)
 """
 from __future__ import annotations
 import json
@@ -14,7 +14,8 @@ from strategy.models import (
 )
 
 
-# Known indicator keywords for quick matching
+# ─── Classical indicator keywords ──────────────────────────────────────────────
+
 INDICATOR_KEYWORDS = {
     "sma": IndicatorType.SMA, "simple moving average": IndicatorType.SMA,
     "ema": IndicatorType.EMA, "exponential moving average": IndicatorType.EMA,
@@ -38,6 +39,75 @@ INDICATOR_KEYWORDS = {
     "volume": IndicatorType.VOLUME,
 }
 
+# ─── ICT concept keywords ──────────────────────────────────────────────────────
+# These map to special indicator types that the backtester understands
+
+ICT_CONCEPTS = {
+    # Fair Value Gap
+    "fvg": "ict_fvg",
+    "fair value gap": "ict_fvg",
+    "fair value": "ict_fvg",
+    "fvg alcista": "ict_fvg_bullish",
+    "fvg bajista": "ict_fvg_bearish",
+    "bullish fvg": "ict_fvg_bullish",
+    "bearish fvg": "ict_fvg_bearish",
+    "primer fvg": "ict_fvg_first",
+    "first fvg": "ict_fvg_first",
+    "ffvg": "ict_fvg_first",
+    
+    # Order Block
+    "order block": "ict_order_block",
+    "orderblock": "ict_order_block",
+    "ob": "ict_order_block",
+    "bloque de ordenes": "ict_order_block",
+    "bloque de orden": "ict_order_block",
+    "bullish order block": "ict_order_block_bullish",
+    "bearish order block": "ict_order_block_bearish",
+    "order block alcista": "ict_order_block_bullish",
+    "order block bajista": "ict_order_block_bearish",
+    
+    # Break of Structure
+    "bos": "ict_bos",
+    "break of structure": "ict_bos",
+    "ruptura de estructura": "ict_bos",
+    "break structure": "ict_bos",
+    
+    # Change of Character
+    "choch": "ict_choch",
+    "change of character": "ict_choch",
+    "cambio de caracter": "ict_choch",
+    
+    # Liquidity
+    "liquidity": "ict_liquidity",
+    "liquidez": "ict_liquidity",
+    "sweep": "ict_liquidity_sweep",
+    "sweep de liquidez": "ict_liquidity_sweep",
+    "liquidity sweep": "ict_liquidity_sweep",
+    
+    # Premium / Discount
+    "premium": "ict_premium",
+    "discount": "ict_discount",
+    "zona premium": "ict_premium",
+    "zona discount": "ict_discount",
+    
+    # Optimal Trade Entry
+    "ote": "ict_ote",
+    "optimal trade entry": "ict_ote",
+    
+    # Killzones
+    "killzone": "ict_killzone",
+    "kill zone": "ict_killzone",
+    "zona de liquidacion": "ict_killzone",
+    "london killzone": "ict_killzone_london",
+    "new york killzone": "ict_killzone_ny",
+    "asian killzone": "ict_killzone_asian",
+    
+    # Consequent Encroachment
+    "consequent encroachment": "ict_ce",
+    "ce": "ict_ce",
+    "consequent encroachment": "ict_ce",
+}
+
 STRATEGY_TYPE_KEYWORDS = {
     "trend following": StrategyType.TREND_FOLLOWING, "trend": StrategyType.TREND_FOLLOWING,
     "seguir tendencia": StrategyType.TREND_FOLLOWING, "seguimiento de tendencia": StrategyType.TREND_FOLLOWING,
@@ -45,6 +115,9 @@ STRATEGY_TYPE_KEYWORDS = {
     "breakout": StrategyType.BREAKOUT, "ruptura": StrategyType.BREAKOUT,
     "scalping": StrategyType.SCALPING, "scalp": StrategyType.SCALPING,
     "swing": StrategyType.SWING, "swing trading": StrategyType.SWING,
+    "ict": StrategyType.CUSTOM, "inner circle trader": StrategyType.CUSTOM,
+    "smart money": StrategyType.CUSTOM, "smart money concepts": StrategyType.CUSTOM,
+    "smc": StrategyType.CUSTOM,
 }
 
 TIMEFRAME_KEYWORDS = {
@@ -62,46 +135,31 @@ TIMEFRAME_KEYWORDS = {
 class StrategyParser:
     """
     Parses natural language trading descriptions into structured StrategyIR.
-    Uses keyword extraction + heuristic parsing. The LLM agent handles
-    complex reasoning; this class handles the structured extraction.
+    Supports classical indicators AND ICT/Smart Money concepts.
     """
 
     def parse(self, text: str, images: Optional[List[str]] = None) -> StrategyIR:
-        """
-        Parse natural language text into a StrategyIR.
-        
-        Args:
-            text: Natural language description of the trading strategy
-            images: Optional list of base64-encoded images
-            
-        Returns:
-            StrategyIR object
-        """
         text_lower = text.lower()
 
-        # Extract strategy type
         strategy_type = self._extract_strategy_type(text_lower)
-
-        # Extract instruments
         instruments = self._extract_instruments(text)
-
-        # Extract timeframes
         timeframes = self._extract_timeframes(text_lower)
-
-        # Extract indicators
+        
+        # Extract both classical indicators AND ICT concepts
         indicators = self._extract_indicators(text_lower)
-
-        # Extract entry signals
-        entry_signals = self._extract_entry_signals(text_lower, indicators)
-
-        # Extract exit signals
-        exit_signals = self._extract_exit_signals(text_lower, indicators)
-
-        # Extract risk management
+        ict_concepts = self._extract_ict_concepts(text_lower)
+        
+        # Merge: ICT concepts become special indicators
+        all_indicators = indicators + ict_concepts
+        
+        entry_signals = self._extract_entry_signals(text_lower, all_indicators)
+        exit_signals = self._extract_exit_signals(text_lower, all_indicators)
         risk_mgmt = self._extract_risk_management(text_lower)
-
-        # Extract strategy name
         name = self._extract_name(text)
+
+        # If we detected ICT concepts but no explicit strategy type, mark as ICT
+        if ict_concepts and strategy_type == StrategyType.CUSTOM:
+            strategy_type = StrategyType.CUSTOM  # Keep as CUSTOM but with ICT tags
 
         ir = StrategyIR(
             name=name,
@@ -109,14 +167,23 @@ class StrategyParser:
             type=strategy_type,
             instruments=instruments if instruments else ["EURUSD"],
             timeframes=timeframes if timeframes else [Timeframe.H1],
-            indicators=indicators,
+            indicators=all_indicators,
             entry_signals=entry_signals,
             exit_signals=exit_signals,
             risk_management=risk_mgmt,
             source_idea=text[:1000],
+            tags=self._extract_tags(text_lower, ict_concepts),
         )
 
         return ir
+
+    def _extract_tags(self, text: str, ict_concepts: List[Indicator]) -> List[str]:
+        tags = []
+        for concept in ict_concepts:
+            tags.append(concept.type.value)
+        if "ict" in text or "inner circle" in text or "smart money" in text or "smc" in text:
+            tags.append("ict")
+        return list(set(tags))
 
     def _extract_strategy_type(self, text: str) -> StrategyType:
         for keyword, stype in STRATEGY_TYPE_KEYWORDS.items():
@@ -125,18 +192,13 @@ class StrategyParser:
         return StrategyType.CUSTOM
 
     def _extract_instruments(self, text: str) -> List[str]:
-        """Extract trading instruments/symbols."""
         instruments = []
-        # Common forex pairs
         forex_pattern = r'\b(EURUSD|GBPUSD|USDJPY|USDCHF|AUDUSD|USDCAD|NZDUSD|EURGBP|EURJPY|GBPJPY|XAUUSD|XAGUSD|BTCUSD|ETHUSD|SPY|QQQ|AAPL|MSFT|GOOGL|TSLA|AMZN|NVDA|EUR/USD|GBP/USD|USD/JPY|gold|silver|bitcoin)\b'
         matches = re.findall(forex_pattern, text, re.IGNORECASE)
         if matches:
             instruments = [m.replace("/", "").upper() for m in matches]
-
-        # Map common names
         name_map = {"GOLD": "XAUUSD", "SILVER": "XAGUSD", "BITCOIN": "BTCUSD"}
         instruments = [name_map.get(i, i) for i in instruments]
-
         return list(set(instruments))
 
     def _extract_timeframes(self, text: str) -> List[Timeframe]:
@@ -147,6 +209,7 @@ class StrategyParser:
         return list(set(timeframes))
 
     def _extract_indicators(self, text: str) -> List[Indicator]:
+        """Extract classical technical indicators."""
         indicators = []
         found_types = set()
 
@@ -158,11 +221,85 @@ class StrategyParser:
 
         return indicators
 
-    def _extract_indicator_params(self, text: str, ind_type: IndicatorType) -> Dict[str, Any]:
-        """Extract parameters for a specific indicator from text."""
+    def _extract_ict_concepts(self, text: str) -> List[Indicator]:
+        """Extract ICT/Smart Money concepts and convert them to indicators."""
+        concepts = []
+        found_types = set()
+
+        # Sort by length (longest first) to match "fair value gap" before "fvg"
+        sorted_concepts = sorted(ICT_CONCEPTS.items(), key=lambda x: len(x[0]), reverse=True)
+
+        for keyword, concept_type in sorted_concepts:
+            if keyword in text and concept_type not in found_types:
+                found_types.add(concept_type)
+                params = self._extract_ict_params(text, concept_type)
+                concepts.append(Indicator(
+                    type=IndicatorType.CUSTOM,
+                    parameters={"ict_concept": concept_type, **params},
+                ))
+
+        return concepts
+
+    def _extract_ict_params(self, text: str, concept_type: str) -> Dict[str, Any]:
+        """Extract parameters for ICT concepts."""
         params = {}
 
-        # Look for period values near the indicator mention
+        if "fvg" in concept_type:
+            params["lookback"] = 50  # bars to look back for FVG detection
+            params["min_gap_pips"] = 1.0  # minimum gap size in pips
+            params["fill_threshold"] = 0.5  # how much of gap must be filled to trigger
+            # Check for specific FVG types
+            if "bullish" in concept_type or "alcista" in text:
+                params["direction"] = "bullish"
+            elif "bearish" in concept_type or "bajista" in text:
+                params["direction"] = "bearish"
+            else:
+                params["direction"] = "both"
+            if "first" in concept_type or "primer" in text:
+                params["mode"] = "first_only"
+            else:
+                params["mode"] = "all"
+
+        elif "order_block" in concept_type:
+            params["lookback"] = 100
+            params["min_ob_size_pips"] = 5.0
+            if "bullish" in concept_type or "alcista" in text:
+                params["direction"] = "bullish"
+            elif "bearish" in concept_type or "bajista" in text:
+                params["direction"] = "bearish"
+            else:
+                params["direction"] = "both"
+
+        elif "bos" in concept_type:
+            params["lookback"] = 50
+            params["swing_detection_bars"] = 5
+
+        elif "choch" in concept_type:
+            params["lookback"] = 50
+            params["swing_detection_bars"] = 5
+
+        elif "liquidity" in concept_type:
+            params["lookback"] = 100
+            params["sweep_threshold_bars"] = 3
+
+        elif "killzone" in concept_type:
+            if "london" in concept_type:
+                params["start_hour"] = 7
+                params["end_hour"] = 10
+            elif "ny" in concept_type:
+                params["start_hour"] = 12
+                params["end_hour"] = 15
+            elif "asian" in concept_type:
+                params["start_hour"] = 0
+                params["end_hour"] = 3
+            else:
+                params["start_hour"] = 7
+                params["end_hour"] = 15
+
+        return params
+
+    def _extract_indicator_params(self, text: str, ind_type: IndicatorType) -> Dict[str, Any]:
+        params = {}
         period_patterns = [
             rf'{ind_type.value}\s*\(?\s*(\d+)\)?',
             rf'(\d+)\s*{ind_type.value}',
@@ -170,14 +307,11 @@ class StrategyParser:
             rf'{ind_type.value}\s+period\s+(\d+)',
             rf'{ind_type.value}\s+período\s+(\d+)',
         ]
-
         for pattern in period_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 params["period"] = int(match.group(1))
                 break
-
-        # Default periods
         if "period" not in params:
             defaults = {
                 IndicatorType.SMA: 20, IndicatorType.EMA: 20, IndicatorType.WMA: 20,
@@ -188,16 +322,12 @@ class StrategyParser:
             }
             if ind_type in defaults and defaults[ind_type]:
                 params["period"] = defaults[ind_type]
-
-        # Bollinger Bands std dev
         if ind_type == IndicatorType.BOLLINGER_BANDS:
             std_match = re.search(r'(?:std|dev|desviación)\s*\(?\s*(\d+(?:\.\d+)?)\)?', text, re.IGNORECASE)
             if std_match:
                 params["std_dev"] = float(std_match.group(1))
             elif "std_dev" not in params:
                 params["std_dev"] = 2.0
-
-        # RSI levels
         if ind_type == IndicatorType.RSI:
             ob_match = re.search(r'(?:overbought|sobrecompra)\s*\(?\s*(\d+)\)?', text, re.IGNORECASE)
             os_match = re.search(r'(?:oversold|sobreventa)\s*\(?\s*(\d+)\)?', text, re.IGNORECASE)
@@ -205,160 +335,296 @@ class StrategyParser:
                 params["overbought"] = int(ob_match.group(1))
             if os_match:
                 params["oversold"] = int(os_match.group(1))
-
-        # MACD parameters
         if ind_type == IndicatorType.MACD:
             params.setdefault("fast_period", 12)
             params.setdefault("slow_period", 26)
             params.setdefault("signal_period", 9)
-
         return params
 
     def _extract_entry_signals(self, text: str, indicators: List[Indicator]) -> List[Signal]:
-        """Extract entry signal conditions from text."""
         signals = []
         text_lower = text.lower()
 
-        # Buy signals
-        buy_keywords = ["buy", "long", "enter long", "go long", "abrir compra", "comprar", "entrada en compra"]
-        sell_keywords = ["sell", "short", "enter short", "go short", "abrir venta", "vender", "entrada en venta"]
+        buy_keywords = ["buy", "long", "enter long", "go long", "abrir compra", "comprar", "entrada en compra", "entrar en compra"]
+        sell_keywords = ["sell", "short", "enter short", "go short", "abrir venta", "vender", "entrada en venta", "entrar en venta"]
 
         has_buy = any(kw in text_lower for kw in buy_keywords)
         has_sell = any(kw in text_lower for kw in sell_keywords)
 
-        if has_buy or (not has_buy and not has_sell):
-            # Default: create a buy signal based on indicators
-            conditions = self._build_conditions_from_indicators(text_lower, indicators, "buy")
-            if conditions:
-                signals.append(Signal(
-                    type=SignalType.BUY,
-                    condition=ConditionGroup(logic="AND", conditions=conditions),
-                    confidence=0.8
-                ))
+        # Check for ICT-specific entry logic
+        ict_indicators = [ind for ind in indicators if ind.type == IndicatorType.CUSTOM and "ict_concept" in ind.parameters]
+        classical_indicators = [ind for ind in indicators if ind.type != IndicatorType.CUSTOM or "ict_concept" not in ind.parameters]
 
-        if has_sell:
-            conditions = self._build_conditions_from_indicators(text_lower, indicators, "sell")
-            if conditions:
-                signals.append(Signal(
-                    type=SignalType.SELL,
-                    condition=ConditionGroup(logic="AND", conditions=conditions),
-                    confidence=0.8
-                ))
+        if ict_indicators:
+            # Build ICT-based entry signals — deduplicate by (concept_type, direction)
+            seen = set()
+            for ict in ict_indicators:
+                concept = ict.parameters.get("ict_concept", "")
+                direction = ict.parameters.get("direction", "both")
 
-        # If no signals could be extracted, create a default one
-        if not signals and indicators:
-            ind = indicators[0]
-            if ind.type in (IndicatorType.SMA, IndicatorType.EMA):
+                if "fvg" in concept:
+                    if direction in ("bullish", "both") and ("fvg", "buy") not in seen:
+                        seen.add(("fvg", "buy"))
+                        signals.append(Signal(
+                            type=SignalType.BUY,
+                            condition=ConditionGroup(logic="AND", conditions=[
+                                Condition(
+                                    left_operand="ict_fvg_bullish",
+                                    operator=ConditionOperator.EQUAL,
+                                    right_operand="true",
+                                )
+                            ]),
+                            confidence=0.75,
+                        ))
+                    if direction in ("bearish", "both") and ("fvg", "sell") not in seen:
+                        seen.add(("fvg", "sell"))
+                        signals.append(Signal(
+                            type=SignalType.SELL,
+                            condition=ConditionGroup(logic="AND", conditions=[
+                                Condition(
+                                    left_operand="ict_fvg_bearish",
+                                    operator=ConditionOperator.EQUAL,
+                                    right_operand="true",
+                                )
+                            ]),
+                            confidence=0.75,
+                        ))
+
+                elif "order_block" in concept:
+                    if direction in ("bullish", "both") and ("ob", "buy") not in seen:
+                        seen.add(("ob", "buy"))
+                        signals.append(Signal(
+                            type=SignalType.BUY,
+                            condition=ConditionGroup(logic="AND", conditions=[
+                                Condition(
+                                    left_operand="price_at_order_block_bullish",
+                                    operator=ConditionOperator.EQUAL,
+                                    right_operand="true",
+                                )
+                            ]),
+                            confidence=0.7,
+                        ))
+                    if direction in ("bearish", "both") and ("ob", "sell") not in seen:
+                        seen.add(("ob", "sell"))
+                        signals.append(Signal(
+                            type=SignalType.SELL,
+                            condition=ConditionGroup(logic="AND", conditions=[
+                                Condition(
+                                    left_operand="price_at_order_block_bearish",
+                                    operator=ConditionOperator.EQUAL,
+                                    right_operand="true",
+                                )
+                            ]),
+                            confidence=0.7,
+                        ))
+
+                elif "bos" in concept and "bos" not in seen:
+                    seen.add("bos")
+                    signals.append(Signal(
+                        type=SignalType.BUY,
+                        condition=ConditionGroup(logic="AND", conditions=[
+                            Condition(
+                                left_operand="ict_bos_bullish",
+                                operator=ConditionOperator.EQUAL,
+                                right_operand="true",
+                            )
+                        ]),
+                        confidence=0.65,
+                    ))
+                    signals.append(Signal(
+                        type=SignalType.SELL,
+                        condition=ConditionGroup(logic="AND", conditions=[
+                            Condition(
+                                left_operand="ict_bos_bearish",
+                                operator=ConditionOperator.EQUAL,
+                                right_operand="true",
+                            )
+                        ]),
+                        confidence=0.65,
+                    ))
+
+                elif "choch" in concept and "choch" not in seen:
+                    seen.add("choch")
+                    signals.append(Signal(
+                        type=SignalType.BUY,
+                        condition=ConditionGroup(logic="AND", conditions=[
+                            Condition(
+                                left_operand="ict_choch_bullish",
+                                operator=ConditionOperator.EQUAL,
+                                right_operand="true",
+                            )
+                        ]),
+                        confidence=0.65,
+                    ))
+                    signals.append(Signal(
+                        type=SignalType.SELL,
+                        condition=ConditionGroup(logic="AND", conditions=[
+                            Condition(
+                                left_operand="ict_choch_bearish",
+                                operator=ConditionOperator.EQUAL,
+                                right_operand="true",
+                            )
+                        ]),
+                        confidence=0.65,
+                    ))
+
+        # Classical indicator signals
+        if classical_indicators and not ict_indicators:
+            if has_buy or (not has_buy and not has_sell):
+                conditions = self._build_conditions_from_indicators(text_lower, classical_indicators, "buy")
+                if conditions:
+                    signals.append(Signal(
+                        type=SignalType.BUY,
+                        condition=ConditionGroup(logic="AND", conditions=conditions),
+                        confidence=0.8,
+                    ))
+
+            if has_sell:
+                conditions = self._build_conditions_from_indicators(text_lower, classical_indicators, "sell")
+                if conditions:
+                    signals.append(Signal(
+                        type=SignalType.SELL,
+                        condition=ConditionGroup(logic="AND", conditions=conditions),
+                        confidence=0.8,
+                    ))
+
+        # Fallback: if no signals at all but we have indicators, create default
+        if not signals:
+            if ict_indicators:
+                # Default ICT signal: buy at first bullish FVG
                 signals.append(Signal(
                     type=SignalType.BUY,
                     condition=ConditionGroup(logic="AND", conditions=[
-                        Condition(left_operand="close", operator=ConditionOperator.CROSSES_ABOVE,
-                                  right_operand=f"{ind.type.value}({ind.parameters.get('period', 20)})")
+                        Condition(
+                            left_operand="ict_fvg_bullish",
+                            operator=ConditionOperator.EQUAL,
+                            right_operand="true",
+                            indicator_ref="fvg_detector",
+                        )
                     ]),
-                    confidence=0.6
+                    confidence=0.6,
                 ))
-            elif ind.type == IndicatorType.RSI:
-                signals.append(Signal(
-                    type=SignalType.BUY,
-                    condition=ConditionGroup(logic="AND", conditions=[
-                        Condition(left_operand=f"rsi({ind.parameters.get('period', 14)})",
-                                  operator=ConditionOperator.LESS_THAN,
-                                  right_operand=str(ind.parameters.get("oversold", 30)))
-                    ]),
-                    confidence=0.6
-                ))
+            elif classical_indicators:
+                ind = classical_indicators[0]
+                if ind.type in (IndicatorType.SMA, IndicatorType.EMA):
+                    signals.append(Signal(
+                        type=SignalType.BUY,
+                        condition=ConditionGroup(logic="AND", conditions=[
+                            Condition(left_operand="close", operator=ConditionOperator.CROSSES_ABOVE,
+                                      right_operand=f"{ind.type.value}({ind.parameters.get('period', 20)})")
+                        ]),
+                        confidence=0.6,
+                    ))
+                elif ind.type == IndicatorType.RSI:
+                    signals.append(Signal(
+                        type=SignalType.BUY,
+                        condition=ConditionGroup(logic="AND", conditions=[
+                            Condition(left_operand=f"rsi({ind.parameters.get('period', 14)})",
+                                      operator=ConditionOperator.LESS_THAN,
+                                      right_operand=str(ind.parameters.get("oversold", 30)))
+                        ]),
+                        confidence=0.6,
+                    ))
 
         return signals
 
     def _extract_exit_signals(self, text: str, indicators: List[Indicator]) -> List[Signal]:
-        """Extract exit signal conditions from text."""
         signals = []
         text_lower = text.lower()
-
-        # Look for explicit exit conditions
         exit_keywords = ["exit", "close", "salida", "cerrar"]
-        if any(kw in text_lower for kw in exit_keywords):
+        has_exit_keyword = any(kw in text_lower for kw in exit_keywords)
+
+        # ICT-based exit signals: close when opposite FVG is hit or after N bars
+        ict_indicators = [ind for ind in indicators if ind.type == IndicatorType.CUSTOM and "ict_concept" in ind.parameters]
+
+        if ict_indicators:
+            # For FVG strategies: close long when bearish FVG appears
+            fvg_indicators = [ict for ict in ict_indicators if "fvg" in ict.parameters.get("ict_concept", "")]
+            if fvg_indicators:
+                signals.append(Signal(
+                    type=SignalType.CLOSE_ALL,
+                    condition=ConditionGroup(logic="OR", conditions=[
+                        Condition(
+                            left_operand="ict_fvg_bearish",
+                            operator=ConditionOperator.EQUAL,
+                            right_operand="true",
+                        ),
+                        Condition(
+                            left_operand="ict_fvg_bullish",
+                            operator=ConditionOperator.EQUAL,
+                            right_operand="true",
+                        ),
+                    ]),
+                    confidence=0.6,
+                ))
+
+        if has_exit_keyword:
             conditions = self._build_conditions_from_indicators(text_lower, indicators, "exit")
             if conditions:
                 signals.append(Signal(
                     type=SignalType.CLOSE_ALL,
                     condition=ConditionGroup(logic="OR", conditions=conditions),
-                    confidence=0.7
+                    confidence=0.7,
                 ))
 
         return signals
 
     def _build_conditions_from_indicators(self, text: str, indicators: List[Indicator],
                                            direction: str) -> List[Condition]:
-        """Build condition objects from extracted indicators and text context."""
         conditions = []
-
         for ind in indicators:
+            # Skip ICT custom indicators here
+            if ind.type == IndicatorType.CUSTOM and "ict_concept" in ind.parameters:
+                continue
             period = ind.parameters.get("period", 20)
-
             if ind.type in (IndicatorType.SMA, IndicatorType.EMA, IndicatorType.WMA):
                 if direction == "buy":
                     conditions.append(Condition(
-                        left_operand="close",
-                        operator=ConditionOperator.CROSSES_ABOVE,
+                        left_operand="close", operator=ConditionOperator.CROSSES_ABOVE,
                         right_operand=f"{ind.type.value}({period})"
                     ))
                 elif direction == "sell":
                     conditions.append(Condition(
-                        left_operand="close",
-                        operator=ConditionOperator.CROSSES_BELOW,
+                        left_operand="close", operator=ConditionOperator.CROSSES_BELOW,
                         right_operand=f"{ind.type.value}({period})"
                     ))
-
             elif ind.type == IndicatorType.RSI:
                 if direction == "buy":
                     conditions.append(Condition(
-                        left_operand=f"rsi({period})",
-                        operator=ConditionOperator.LESS_THAN,
+                        left_operand=f"rsi({period})", operator=ConditionOperator.LESS_THAN,
                         right_operand=str(ind.parameters.get("oversold", 30))
                     ))
                 elif direction == "sell":
                     conditions.append(Condition(
-                        left_operand=f"rsi({period})",
-                        operator=ConditionOperator.GREATER_THAN,
+                        left_operand=f"rsi({period})", operator=ConditionOperator.GREATER_THAN,
                         right_operand=str(ind.parameters.get("overbought", 70))
                     ))
-
             elif ind.type == IndicatorType.MACD:
                 if direction == "buy":
                     conditions.append(Condition(
-                        left_operand="macd_line",
-                        operator=ConditionOperator.CROSSES_ABOVE,
+                        left_operand="macd_line", operator=ConditionOperator.CROSSES_ABOVE,
                         right_operand="macd_signal"
                     ))
                 elif direction == "sell":
                     conditions.append(Condition(
-                        left_operand="macd_line",
-                        operator=ConditionOperator.CROSSES_BELOW,
+                        left_operand="macd_line", operator=ConditionOperator.CROSSES_BELOW,
                         right_operand="macd_signal"
                     ))
-
             elif ind.type == IndicatorType.BOLLINGER_BANDS:
                 if direction == "buy":
                     conditions.append(Condition(
-                        left_operand="close",
-                        operator=ConditionOperator.LESS_THAN,
+                        left_operand="close", operator=ConditionOperator.LESS_THAN,
                         right_operand="lower_bb"
                     ))
                 elif direction == "sell":
                     conditions.append(Condition(
-                        left_operand="close",
-                        operator=ConditionOperator.GREATER_THAN,
+                        left_operand="close", operator=ConditionOperator.GREATER_THAN,
                         right_operand="upper_bb"
                     ))
-
         return conditions
 
     def _extract_risk_management(self, text: str) -> RiskManagement:
-        """Extract risk management parameters from text."""
         rm = RiskManagement()
-
-        # Stop loss
         sl_match = re.search(
             r'(?:stop\s*loss|stop|sl|stop\s*loss\s+de)\s*(?:of|de|:)?\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:pips|pip|points|point|puntos)?\)?',
             text, re.IGNORECASE
@@ -366,8 +632,6 @@ class StrategyParser:
         if sl_match:
             rm.stop_loss = float(sl_match.group(1))
             rm.stop_loss_type = "fixed"
-
-        # ATR-based stop loss
         atr_sl = re.search(
             r'(?:atr|average true range)\s+(?:stop|sl)\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:x|times|veces)?\)?',
             text, re.IGNORECASE
@@ -375,8 +639,6 @@ class StrategyParser:
         if atr_sl:
             rm.stop_loss = float(atr_sl.group(1))
             rm.stop_loss_type = "atr_based"
-
-        # Take profit
         tp_match = re.search(
             r'(?:take\s*profit|tp|take\s*profit\s+de|objetivo)\s*(?:of|de|:)?\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:pips|pip|points|point|puntos)?\)?',
             text, re.IGNORECASE
@@ -384,50 +646,39 @@ class StrategyParser:
         if tp_match:
             rm.take_profit = float(tp_match.group(1))
             rm.take_profit_type = "fixed"
-
-        # Risk per trade
         risk_match = re.search(
             r'(?:risk|riesgo)\s*(?:per trade|por operación)?\s*\(?\s*(\d+(?:\.\d+)?)\s*%?\)?',
             text, re.IGNORECASE
         )
         if risk_match:
             rm.risk_per_trade = float(risk_match.group(1))
-
-        # Position size
         pos_match = re.search(
             r'(?:position size|tamaño|lot|lots|lotes)\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:lots|lotes)?\)?',
             text, re.IGNORECASE
         )
         if pos_match:
             rm.max_position_size = float(pos_match.group(1))
-
-        # Max drawdown
         dd_match = re.search(
             r'(?:max drawdown|máximo drawdown|drawdown)\s*\(?\s*(\d+(?:\.\d+)?)\s*%?\)?',
             text, re.IGNORECASE
         )
         if dd_match:
             rm.max_drawdown_limit = float(dd_match.group(1))
-
-        # Trailing stop
         ts_match = re.search(
             r'(?:trailing stop|trailing)\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:pips|pip|points|puntos)?\)?',
             text, re.IGNORECASE
         )
         if ts_match:
             rm.trailing_stop = float(ts_match.group(1))
-
         return rm
 
     def _extract_name(self, text: str) -> str:
-        """Try to extract a strategy name from the text."""
         name_match = re.search(
             r'(?:strategy|estrategia|strategy name|nombre)\s*(?:is|es|:)?\s*["\']?([^"\'\n.]+)["\']?',
             text, re.IGNORECASE
         )
         if name_match:
             return name_match.group(1).strip()[:50]
-        # Use first few words
         words = text.split()[:5]
         return " ".join(words)[:50]
 

@@ -87,6 +87,9 @@ class BacktestEngine:
         # Calculate indicators from strategy definition
         data = self._calculate_indicators(data, strategy.get("indicators", []))
 
+        # Compute ICT concepts (FVG, Order Block, BOS, CHoCH)
+        data = self._compute_ict_concepts(data)
+
         # Execute strategy logic
         trades, equity_curve = self._execute_strategy(
             data, strategy, initial_capital, commission
@@ -556,10 +559,19 @@ class BacktestEngine:
         return any(results)
 
     def _evaluate_condition(self, bar: dict, prev_bar: dict, cond: dict) -> bool:
-        """Evaluate a single condition."""
-        left = self._resolve_operand(cond.get("left_operand", ""), bar, prev_bar)
-        right = self._resolve_operand(cond.get("right_operand", ""), bar, prev_bar)
+        """Evaluate a single condition — supports both classical and ICT concepts."""
+        left_operand = cond.get("left_operand", "")
+        right_operand = cond.get("right_operand", "")
         op = cond.get("operator", "==")
+
+        # ── ICT concept evaluation ──────────────────────────────────────
+        ict_result = self._evaluate_ict_condition(bar, prev_bar, left_operand, right_operand, op)
+        if ict_result is not None:
+            return ict_result
+
+        # ── Classical evaluation ─────────────────────────────────────────
+        left = self._resolve_operand(left_operand, bar, prev_bar)
+        right = self._resolve_operand(right_operand, bar, prev_bar)
 
         if left is None or right is None:
             return False
@@ -581,19 +593,201 @@ class BacktestEngine:
         elif op == "<=":
             return left_val <= right_val
         elif op == "crosses_above":
-            prev_left = self._resolve_operand(cond.get("left_operand", ""), prev_bar, None)
-            prev_right = self._resolve_operand(cond.get("right_operand", ""), prev_bar, None)
+            prev_left = self._resolve_operand(left_operand, prev_bar, None)
+            prev_right = self._resolve_operand(right_operand, prev_bar, None)
             if prev_left is None or prev_right is None:
                 return False
             return float(prev_left) <= float(prev_right) and left_val > right_val
         elif op == "crosses_below":
-            prev_left = self._resolve_operand(cond.get("left_operand", ""), prev_bar, None)
-            prev_right = self._resolve_operand(cond.get("right_operand", ""), prev_bar, None)
+            prev_left = self._resolve_operand(left_operand, prev_bar, None)
+            prev_right = self._resolve_operand(right_operand, prev_bar, None)
             if prev_left is None or prev_right is None:
                 return False
             return float(prev_left) >= float(prev_right) and left_val < right_val
 
         return False
+
+    def _evaluate_ict_condition(self, bar: dict, prev_bar: dict, left: str, right: str, op: str) -> Optional[bool]:
+        """
+        Evaluate ICT-specific conditions. Returns True/False if it's an ICT condition,
+        or None if it's not an ICT condition (fall back to classical).
+        """
+        if op != "==":
+            return None
+
+        # Check if bar has ICT data computed
+        if not bar.get("_ict_computed"):
+            return None
+
+        # Bullish FVG
+        if left == "ict_fvg_bullish" and right == "true":
+            return bar.get("ict_fvg_bullish", False)
+        if left == "ict_fvg_bearish" and right == "true":
+            return bar.get("ict_fvg_bearish", False)
+
+        # Order Block
+        if left == "price_at_order_block_bullish" and right == "true":
+            return bar.get("price_at_ob_bullish", False)
+        if left == "price_at_order_block_bearish" and right == "true":
+            return bar.get("price_at_ob_bearish", False)
+
+        # BOS
+        if left == "ict_bos_bullish" and right == "true":
+            return bar.get("ict_bos_bullish", False)
+        if left == "ict_bos_bearish" and right == "true":
+            return bar.get("ict_bos_bearish", False)
+
+        # CHoCH
+        if left == "ict_choch_bullish" and right == "true":
+            return bar.get("ict_choch_bullish", False)
+        if left == "ict_choch_bearish" and right == "true":
+            return bar.get("ict_choch_bearish", False)
+
+        return None
+
+    def _compute_ict_concepts(self, data: List[dict]) -> List[dict]:
+        """
+        Compute ICT concepts on OHLCV data:
+        - Fair Value Gaps (FVG)
+        - Order Blocks (OB)
+        - Break of Structure (BOS)
+        - Change of Character (CHoCH)
+        """
+        # ── 1. Detect Fair Value Gaps ────────────────────────────────────
+        # Bullish FVG: low of bar[i] > high of bar[i-2] (gap up)
+        # Bearish FVG: high of bar[i] < low of bar[i-2] (gap down)
+        for i in range(2, len(data)):
+            # Bullish FVG
+            gap_up = data[i]["low"] - data[i-2]["high"]
+            data[i]["ict_fvg_bullish"] = gap_up > 0
+            data[i]["ict_fvg_bullish_size"] = gap_up if gap_up > 0 else 0
+            data[i]["ict_fvg_bullish_top"] = data[i]["low"] if gap_up > 0 else 0
+            data[i]["ict_fvg_bullish_bottom"] = data[i-2]["high"] if gap_up > 0 else 0
+
+            # Bearish FVG
+            gap_down = data[i-2]["low"] - data[i]["high"]
+            data[i]["ict_fvg_bearish"] = gap_down > 0
+            data[i]["ict_fvg_bearish_size"] = gap_down if gap_down > 0 else 0
+            data[i]["ict_fvg_bearish_top"] = data[i-2]["low"] if gap_down > 0 else 0
+            data[i]["ict_fvg_bearish_bottom"] = data[i]["high"] if gap_down > 0 else 0
+
+        # ── 2. Detect Order Blocks ───────────────────────────────────────
+        # Bullish OB: last bearish candle before a strong move up
+        # Bearish OB: last bullish candle before a strong move down
+        for i in range(5, len(data) - 3):
+            # Bullish OB: bar[i] is bearish (close < open), followed by 3+ bullish bars
+            if data[i]["close"] < data[i]["open"]:
+                follow_up = sum(1 for j in range(1, 4) if data[i+j]["close"] > data[i+j]["open"])
+                if follow_up >= 2:
+                    data[i]["ict_ob_bullish"] = True
+                    data[i]["ict_ob_bullish_high"] = data[i]["high"]
+                    data[i]["ict_ob_bullish_low"] = data[i]["low"]
+                    data[i]["ict_ob_bullish_mid"] = (data[i]["high"] + data[i]["low"]) / 2
+
+            # Bearish OB: bar[i] is bullish (close > open), followed by 3+ bearish bars
+            if data[i]["close"] > data[i]["open"]:
+                follow_down = sum(1 for j in range(1, 4) if data[i+j]["close"] < data[i+j]["open"])
+                if follow_down >= 2:
+                    data[i]["ict_ob_bearish"] = True
+                    data[i]["ict_ob_bearish_high"] = data[i]["high"]
+                    data[i]["ict_ob_bearish_low"] = data[i]["low"]
+                    data[i]["ict_ob_bearish_mid"] = (data[i]["high"] + data[i]["low"]) / 2
+
+        # ── 3. Detect BOS (Break of Structure) ───────────────────────────
+        # Track swing highs and swing lows
+        swing_highs = []
+        swing_lows = []
+        for i in range(2, len(data) - 2):
+            # Swing high
+            if (data[i]["high"] > data[i-1]["high"] and data[i]["high"] > data[i-2]["high"] and
+                data[i]["high"] > data[i+1]["high"] and data[i]["high"] > data[i+2]["high"]):
+                swing_highs.append((i, data[i]["high"]))
+            # Swing low
+            if (data[i]["low"] < data[i-1]["low"] and data[i]["low"] < data[i-2]["low"] and
+                data[i]["low"] < data[i+1]["low"] and data[i]["low"] < data[i+2]["low"]):
+                swing_lows.append((i, data[i]["low"]))
+
+        # BOS bullish: price breaks above last swing high
+        # BOS bearish: price breaks below last swing low
+        last_sh_idx = -1
+        last_sl_idx = -1
+        for i in range(len(data)):
+            # Update last swing points
+            for sh_i, sh_val in swing_highs:
+                if sh_i < i:
+                    last_sh_i = sh_i
+            for sl_i, sl_val in swing_lows:
+                if sl_i < i:
+                    last_sl_i = sl_i
+
+            data[i]["ict_bos_bullish"] = False
+            data[i]["ict_bos_bearish"] = False
+
+            # Check BOS
+            if len(swing_highs) >= 2:
+                prev_sh = swing_highs[-2][1] if len(swing_highs) >= 2 else None
+                if prev_sh and data[i]["close"] > prev_sh:
+                    data[i]["ict_bos_bullish"] = True
+
+            if len(swing_lows) >= 2:
+                prev_sl = swing_lows[-2][1] if len(swing_lows) >= 2 else None
+                if prev_sl and data[i]["close"] < prev_sl:
+                    data[i]["ict_bos_bearish"] = True
+
+        # ── 4. Detect CHoCH (Change of Character) ────────────────────────
+        # After a series of higher highs, price makes a lower low (bearish CHoCH)
+        # After a series of lower lows, price makes a higher high (bullish CHoCH)
+        for i in range(10, len(data)):
+            data[i]["ict_choch_bullish"] = False
+            data[i]["ict_choch_bearish"] = False
+
+            # Look at recent swing pattern
+            recent_sh = [sh for sh in swing_highs if sh[0] < i][-3:]
+            recent_sl = [sl for sl in swing_lows if sl[0] < i][-3:]
+
+            if len(recent_sl) >= 2:
+                # Downtrend: lower lows
+                if recent_sl[-1][1] < recent_sl[-2][1]:
+                    # Bullish CHoCH: price breaks above recent swing high
+                    if recent_sh and data[i]["close"] > recent_sh[-1][1]:
+                        data[i]["ict_choch_bullish"] = True
+
+            if len(recent_sh) >= 2:
+                # Uptrend: higher highs
+                if recent_sh[-1][1] > recent_sh[-2][1]:
+                    # Bearish CHoCH: price breaks below recent swing low
+                    if recent_sl and data[i]["close"] < recent_sl[-1][1]:
+                        data[i]["ict_choch_bearish"] = True
+
+        # ── 5. Mark bars where price is at an Order Block zone ───────────
+        active_ob_bullish = []  # list of (high, low) for active bullish OBs
+        active_ob_bearish = []
+        for i in range(len(data)):
+            # Register new OBs
+            if data[i].get("ict_ob_bullish"):
+                active_ob_bullish.append((data[i]["high"], data[i]["low"]))
+            if data[i].get("ict_ob_bearish"):
+                active_ob_bearish.append((data[i]["high"], data[i]["low"]))
+
+            # Check if price is at an OB zone
+            data[i]["price_at_ob_bullish"] = False
+            data[i]["price_at_ob_bearish"] = False
+
+            for ob_high, ob_low in active_ob_bullish[-5:]:  # check last 5 OBs
+                if ob_low <= data[i]["low"] <= ob_high or ob_low <= data[i]["close"] <= ob_high:
+                    data[i]["price_at_ob_bullish"] = True
+                    break
+
+            for ob_high, ob_low in active_ob_bearish[-5:]:
+                if ob_low <= data[i]["low"] <= ob_high or ob_low <= data[i]["close"] <= ob_high:
+                    data[i]["price_at_ob_bearish"] = True
+                    break
+
+        # Mark all bars as ICT computed
+        for bar in data:
+            bar["_ict_computed"] = True
+
+        return data
 
     def _resolve_operand(self, operand: str, bar: dict, prev_bar: dict) -> Optional[float]:
         """Resolve an operand string to a numeric value."""
