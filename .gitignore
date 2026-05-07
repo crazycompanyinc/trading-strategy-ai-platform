@@ -32,6 +32,14 @@ node_modules/
 frontend/build/
 frontend/dist/
 
-# Reports
-reports/*.html
-reports/*.pdf
+# Electron-builder outputs
+frontend/dist*/
+frontend/dist_*
+frontend/dist4
+frontend/dist5
+frontend/dist_v2
+frontend/dist3
+!frontend/build/
+
+# Backup files
+*.bak

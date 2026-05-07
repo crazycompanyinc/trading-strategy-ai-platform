@@ -5,8 +5,32 @@ FastAPI backend with WebSocket support for real-time chat
 import os
 import uuid
 import json
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+
+# Load environment from Hermes .env file
+def load_env():
+    """Load environment variables from Hermes .env file."""
+    env_paths = [
+        Path.home() / ".hermes" / ".env",
+        Path(".env"),
+    ]
+    for env_path in env_paths:
+        if env_path.exists():
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        value = value.strip().strip('"').strip("'")
+                        if key and value and key not in os.environ:
+                            os.environ[key] = value
+            print(f"[Config] Loaded env from {env_path}")
+            break
+
+load_env()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
