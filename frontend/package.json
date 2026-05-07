@@ -74,10 +74,9 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "public/icon.ico",
       "publisherName": "crazycompanyinc",
       "verifyUpdateCodeSignature": false,
-      "artifactName": "TradingStrategyAI-Setup-${version}.${ext}"
+      "artifactName": "TradingStrategyAI-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -85,13 +84,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Trading Strategy AI",
-      "installerIcon": "public/icon.ico",
-      "uninstallerIcon": "public/icon.ico",
-      "license": "LICENSE",
       "artifactName": "TradingStrategyAI-Setup-${version}.exe",
       "deleteAppDataOnUninstall": false,
-      "runAfterFinish": true,
-      "menuCategory": "Trading Strategy AI"
+      "runAfterFinish": true
     },
     "portable": {
       "artifactName": "TradingStrategyAI-Portable-${version}.exe"
