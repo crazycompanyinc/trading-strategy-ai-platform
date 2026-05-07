@@ -4,17 +4,6 @@ const fs = require('fs');
 
 let mainWindow;
 
-function getIndexHtmlPath() {
-  // In development: react build is at ../build/ relative to this file
-  // In production (packaged): electron-builder puts build/ at the root of the asar, alongside electron/
-  const isDev = !app.isPackaged;
-  if (isDev) {
-    return path.join(__dirname, '..', 'build', 'index.html');
-  }
-  // Packaged: build/ is at the same level as electron/ inside the asar
-  return path.join(__dirname, '..', 'build', 'index.html');
-}
-
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -30,10 +19,34 @@ function createWindow() {
     },
   });
 
-  const indexPath = getIndexHtmlPath();
-  console.log('Loading:', indexPath);
-  console.log('Exists:', fs.existsSync(indexPath));
-  mainWindow.loadFile(indexPath);
+  // Load the React app
+  // In dev: electron/ is at project root, build/ is sibling
+  // In production: both are inside asar at same level
+  let indexPath;
+  if (app.isPackaged) {
+    // Inside asar: electron/main.js -> ../build/index.html
+    indexPath = path.join(__dirname, '..', 'build', 'index.html');
+  } else {
+    // Development: electron/ is in project root
+    indexPath = path.join(__dirname, '..', 'build', 'index.html');
+  }
+
+  console.log('Loading index from:', indexPath);
+  console.log('__dirname:', __dirname);
+  console.log('isPackaged:', app.isPackaged);
+  console.log('appPath:', app.getAppPath());
+
+  mainWindow.loadFile(indexPath).catch(err => {
+    console.error('Failed to load index.html:', err.message);
+    // Fallback: try loading from app path
+    const fallback = path.join(app.getAppPath(), 'build', 'index.html');
+    console.log('Trying fallback:', fallback);
+    mainWindow.loadFile(fallback).catch(e => {
+      console.error('Fallback also failed:', e.message);
+      // Last resort: load a simple error page
+      mainWindow.loadURL('data:text/html,<h1>Error loading app</h1><p>' + e.message + '</p>');
+    });
+  });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
