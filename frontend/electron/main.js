@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 let mainWindow;
 let backendProcess;
@@ -15,32 +15,27 @@ const CONFIG_DIR = path.join(app.getPath('userData'), 'config');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'settings.json');
 
 function loadConfig() {
-  try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-    }
-  } catch (e) { config = {}; }
+  try { if (fs.existsSync(CONFIG_FILE)) config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); }
+  catch(e) { config = {}; }
+  return config;
+}
+function saveConfig(nc) {
+  config = { ...config, ...nc };
+  try { if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true }); fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2)); }
+  catch(e) { console.error('saveConfig:', e); }
   return config;
 }
 
-function saveConfig(newConfig) {
-  config = { ...config, ...newConfig };
-  try {
-    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-  } catch (e) { console.error('saveConfig:', e); }
-  return config;
-}
+// ─── Log helper ────────────────────────────────────────────────────────────────
+function log(msg) { console.log('[Launcher]', msg); if (mainWindow) mainWindow.webContents.send('backend-log', msg); }
+function logErr(msg) { console.error('[Launcher]', msg); if (mainWindow) mainWindow.webContents.send('backend-error', msg); }
 
-// ─── Extract backend from asar ─────────────────────────────────────────────────
+// ─── Extract backend ───────────────────────────────────────────────────────────
 function extractBackend() {
-  if (backendTempDir && fs.existsSync(path.join(backendTempDir, 'main.py'))) {
-    return backendTempDir;
-  }
+  if (backendTempDir && fs.existsSync(path.join(backendTempDir, 'main.py'))) return backendTempDir;
   backendTempDir = path.join(os.tmpdir(), 'trading-strategy-backend');
   try {
     if (!fs.existsSync(backendTempDir)) fs.mkdirSync(backendTempDir, { recursive: true });
-
     const asarRoot = path.dirname(__dirname);
     const appRoot = path.dirname(asarRoot);
     const locations = [
@@ -52,101 +47,138 @@ function extractBackend() {
     for (const loc of locations) {
       if (fs.existsSync(path.join(loc, 'main.py'))) { src = loc; break; }
     }
-    if (!src) {
-      console.error('Backend not found in any location:', locations);
-      if (mainWindow) mainWindow.webContents.send('backend-error', 'Backend files not found.');
-      return null;
-    }
-    console.log('Copying backend from:', src);
-    const entries = fs.readdirSync(src, { withFileTypes: true });
-    for (const entry of entries) {
-      const s = path.join(src, entry.name);
-      const d = path.join(backendTempDir, entry.name);
+    if (!src) { logErr('Backend not found in: ' + locations.join(', ')); return null; }
+    log('Copying backend from: ' + src);
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      const s = path.join(src, entry.name), d = path.join(backendTempDir, entry.name);
       if (entry.isDirectory()) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); copyDir(s, d); }
-      else { fs.copyFileSync(s, d); }
+      else fs.copyFileSync(s, d);
     }
-    console.log('Backend extracted to:', backendTempDir);
+    log('Backend extracted to: ' + backendTempDir);
     return backendTempDir;
-  } catch (e) {
-    console.error('extractBackend:', e);
-    return null;
-  }
+  } catch(e) { logErr('extractBackend: ' + e.message); return null; }
 }
 
 function copyDir(src, dest) {
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const s = path.join(src, entry.name);
-    const d = path.join(dest, entry.name);
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name), d = path.join(dest, entry.name);
     if (entry.isDirectory()) { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); copyDir(s, d); }
-    else { fs.copyFileSync(s, d); }
+    else fs.copyFileSync(s, d);
   }
 }
 
 // ─── Find Python ───────────────────────────────────────────────────────────────
 function findPython() {
+  log('Searching for Python...');
   const backendDir = extractBackend();
-  const cands = process.platform === 'win32'
-    ? [path.join(backendDir||'','venv','Scripts','python.exe'), path.join(process.resourcesPath,'python','python.exe'), 'python.exe', 'python3.exe', 'py.exe']
-    : [path.join(backendDir||'','venv','bin','python3'), 'python3', 'python'];
+  const isWin = process.platform === 'win32';
+  
+  // Build candidate list
+  const cands = [];
+  if (isWin) {
+    cands.push(
+      path.join(backendDir||'','venv','Scripts','python.exe'),
+      path.join(process.resourcesPath||'','python','python.exe'),
+      'py.exe', 'python.exe', 'python3.exe',
+    );
+    // Check common install locations
+    const localAppData = process.env.LOCALAPPDATA || '';
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    cands.push(
+      path.join(localAppData,'Programs','Python','Python312','python.exe'),
+      path.join(localAppData,'Programs','Python','Python311','python.exe'),
+      path.join(localAppData,'Programs','Python','Python310','python.exe'),
+      path.join(programFiles,'Python312','python.exe'),
+      path.join(programFiles,'Python311','python.exe'),
+      path.join(programFiles,'Python310','python.exe'),
+      path.join(programFilesX86,'Python312','python.exe'),
+      path.join(programFilesX86,'Python311','python.exe'),
+    );
+  } else {
+    cands.push(
+      path.join(backendDir||'','venv','bin','python3'),
+      'python3', 'python',
+    );
+  }
+
   for (const cmd of cands) {
     if (!cmd) continue;
     try {
-      if (cmd.includes(path.sep) && fs.existsSync(cmd)) return cmd;
-      const { execSync } = require('child_process');
-      execSync(`"${cmd}" --version`, { stdio: 'pipe' });
-      return cmd;
+      if (cmd.includes(path.sep)) {
+        if (fs.existsSync(cmd)) { log('Found Python at: ' + cmd); return cmd; }
+      } else {
+        const out = execSync(`"${cmd}" --version`, { stdio: 'pipe', timeout: 5000 }).toString().trim();
+        log('Found Python in PATH: ' + cmd + ' -> ' + out);
+        return cmd;
+      }
     } catch(e) {}
   }
+  logErr('Python not found. Tried: ' + cands.length + ' locations');
   return null;
 }
 
 // ─── Install deps ──────────────────────────────────────────────────────────────
-function installDeps(backendDir, pythonCmd) {
+function runCmd(cmd, args, opts) {
   return new Promise((resolve, reject) => {
-    const req = path.join(backendDir, 'requirements.txt');
-    if (!fs.existsSync(req)) { resolve(); return; }
-    console.log('pip install -r', req);
-    if (mainWindow) mainWindow.webContents.send('backend-log', 'Installing Python dependencies (first run, may take a minute)...');
-    const p = spawn(pythonCmd, ['-m','pip','install','-r', req], { cwd: backendDir, windowsHide: true, timeout: 180000 });
-    p.stdout.on('data', d => { if (mainWindow) mainWindow.webContents.send('backend-log', d.toString().trim()); });
-    p.stderr.on('data', d => { if (mainWindow) mainWindow.webContents.send('backend-log', d.toString().trim()); });
-    p.on('close', code => {
-      if (code === 0) {
-        console.log('pip install OK');
-        if (mainWindow) mainWindow.webContents.send('backend-log', '✓ Dependencies installed successfully');
-        depsInstalled = true;
-        resolve();
-      } else {
-        const m = `pip install failed (exit ${code}). Install manually: pip install -r requirements.txt`;
-        if (mainWindow) mainWindow.webContents.send('backend-error', m);
-        reject(new Error(m));
-      }
-    });
+    log(`Running: ${cmd} ${args.join(' ')}`);
+    const p = spawn(cmd, args, { windowsHide: true, timeout: 300000, ...opts });
+    let out = '', err = '';
+    p.stdout.on('data', d => { out += d.toString(); log(d.toString().trim()); });
+    p.stderr.on('data', d => { err += d.toString(); log('pip: ' + d.toString().trim()); });
+    p.on('close', code => code === 0 ? resolve(out) : reject(new Error(`exit ${code}: ${err||out}`)));
     p.on('error', reject);
   });
 }
 
+async function installDeps(backendDir, pythonCmd) {
+  const req = path.join(backendDir, 'requirements.txt');
+  if (!fs.existsSync(req)) { log('No requirements.txt, skipping'); return; }
+
+  log('Installing Python dependencies...');
+  log('Python: ' + pythonCmd);
+  log('Requirements: ' + req);
+
+  // First ensure pip is available
+  try {
+    await runCmd(pythonCmd, ['-m', 'pip', '--version'], { timeout: 10000 });
+  } catch(e) {
+    log('pip not found, trying ensurepip...');
+    try { await runCmd(pythonCmd, ['-m', 'ensurepip', '--upgrade'], { timeout: 30000 }); } catch(e2) { logErr('ensurepip failed: ' + e2.message); }
+  }
+
+  // Install requirements
+  await runCmd(pythonCmd, ['-m', 'pip', 'install', '-r', req, '--no-cache-dir'], { cwd: backendDir });
+  log('✓ Dependencies installed successfully');
+  depsInstalled = true;
+}
+
 // ─── Start backend ─────────────────────────────────────────────────────────────
 async function startBackend() {
-  if (backendProcess) return;
+  if (backendProcess) { log('Backend already running'); return; }
 
   const backendDir = extractBackend();
-  if (!backendDir) return;
+  if (!backendDir) { logErr('Cannot find backend files'); return; }
 
   const pythonCmd = findPython();
   if (!pythonCmd) {
-    if (mainWindow) mainWindow.webContents.send('backend-error', 'Python not found. Install Python 3.10+ and restart.');
+    logErr('Python NOT FOUND. Install Python 3.10+ from https://python.org and restart this app.');
     return;
   }
 
-  // Install deps if not done yet
+  // Install deps
   if (!depsInstalled) {
-    try { await installDeps(backendDir, pythonCmd); } catch(e) { console.warn('pip install failed, continuing anyway'); }
+    try {
+      await installDeps(backendDir, pythonCmd);
+    } catch(e) {
+      logErr('pip install failed: ' + e.message + '. Backend may not work.');
+    }
   }
 
   const mainScript = path.join(backendDir, 'main.py');
-  console.log('Starting backend:', pythonCmd, mainScript);
+  if (!fs.existsSync(mainScript)) { logErr('main.py not found: ' + mainScript); return; }
+
+  log('Starting backend: ' + pythonCmd + ' ' + mainScript);
 
   const env = { ...process.env };
   if (config.openrouterApiKey) env.OPENROUTER_API_KEY = config.openrouterApiKey;
@@ -156,11 +188,11 @@ async function startBackend() {
     backendProcess = spawn(pythonCmd, [mainScript], { cwd: backendDir, env, stdio: ['pipe','pipe','pipe'], windowsHide: true });
     backendProcess.stdout.on('data', d => { const m = d.toString().trim(); console.log('[B]', m); if (mainWindow) mainWindow.webContents.send('backend-log', m); });
     backendProcess.stderr.on('data', d => { const m = d.toString().trim(); console.error('[BE]', m); if (mainWindow) mainWindow.webContents.send('backend-error', m); });
-    backendProcess.on('close', code => { console.log('Backend exited:', code); backendProcess = null; if (mainWindow) mainWindow.webContents.send('backend-status', 'stopped'); });
-    backendProcess.on('error', err => { console.error('Backend error:', err); backendProcess = null; if (mainWindow) mainWindow.webContents.send('backend-error', `Start failed: ${err.message}`); });
+    backendProcess.on('close', code => { log('Backend exited: ' + code); backendProcess = null; if (mainWindow) mainWindow.webContents.send('backend-status', 'stopped'); });
+    backendProcess.on('error', err => { logErr('Backend error: ' + err.message); backendProcess = null; });
     if (mainWindow) mainWindow.webContents.send('backend-status', 'running');
-  } catch (err) {
-    if (mainWindow) mainWindow.webContents.send('backend-error', `Spawn failed: ${err.message}`);
+  } catch(err) {
+    logErr('Spawn failed: ' + err.message);
   }
 }
 
@@ -174,10 +206,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: Math.min(1400, width - 100), height: Math.min(900, height - 100),
     minWidth: 1000, minHeight: 700, backgroundColor: '#0d1117',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false, sandbox: false,
-    },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   const idx = path.join(__dirname, '..', 'build', 'index.html');
   mainWindow.loadFile(idx).catch(e => mainWindow.loadURL(`data:text/html,<h1 style="color:white;background:#0d1117;padding:40px">Error: ${e.message}</h1>`));
