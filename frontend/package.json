@@ -68,6 +68,13 @@
       "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
     ],
     "asar": true,
+    "extraResources": [
+      {
+        "from": "../backend/",
+        "to": "backend/",
+        "filter": ["**/*", "!__pycache__/", "!venv/", "!*.pyc"]
+      }
+    ],
     "win": {
       "target": ["nsis", "portable"],
       "publisherName": "crazycompanyinc",
