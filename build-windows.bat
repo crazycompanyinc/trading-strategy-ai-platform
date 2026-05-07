@@ -21,23 +21,23 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo [3/4] Building Electron NSIS installer...
-call npx electron-builder --win nsis
+echo [3/4] Building Electron portable .exe...
+call npx electron-builder --win portable
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Electron build failed
     exit /b 1
 )
 
 echo.
-echo [4/4] Building portable version...
-call npx electron-builder --win portable
+echo [4/4] Building NSIS installer...
+call npx electron-builder --win nsis
 
 echo.
 echo ============================================
 echo Build complete!
 echo.
-echo Installer: frontend\dist\TradingStrategyAI-Setup-1.0.0.exe
 echo Portable:  frontend\dist\TradingStrategyAI-Portable-1.0.0.exe
+echo Installer: frontend\dist\TradingStrategyAI-Setup-1.0.0.exe
 echo ============================================
 
 cd ..
