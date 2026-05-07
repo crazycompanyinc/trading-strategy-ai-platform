@@ -7,10 +7,14 @@
     "start": "electron .",
     "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && electron .\"",
     "dev:react": "react-scripts start",
-    "build": "react-scripts build && electron-builder",
+    "build": "react-scripts build && electron-builder --win",
     "build:react": "react-scripts build",
+    "build:win": "react-scripts build && electron-builder --win nsis",
+    "build:win:portable": "react-scripts build && electron-builder --win portable",
+    "build:all": "react-scripts build && electron-builder --win --mac --linux",
     "test": "react-scripts test",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "postinstall": "electron-builder install-app-deps"
   },
   "keywords": ["trading", "strategy", "backtesting", "ai", "metatrader", "mql5"],
   "author": "crazycompanyinc",
@@ -42,21 +46,65 @@
   "build": {
     "appId": "com.crazycompanyinc.trading-strategy-ai",
     "productName": "Trading Strategy AI",
+    "copyright": "Copyright (c) 2026 crazycompanyinc",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "build/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/",
+        "to": "app/build/",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icon.ico",
+      "publisherName": "crazycompanyinc",
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "TradingStrategyAI-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Trading Strategy AI",
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "license": "LICENSE",
+      "artifactName": "TradingStrategyAI-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "menuCategory": "Trading Strategy AI"
+    },
+    "portable": {
+      "artifactName": "TradingStrategyAI-Portable-${version}.exe"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "public/icon.icns",
+      "category": "public.app-category.finance"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "public/icon.png",
+      "category": "Office"
     }
   },
   "browserslist": {

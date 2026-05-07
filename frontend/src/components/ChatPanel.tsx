@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useStore } from '../stores/appStore';
-import { Message } from '../types';
+import type { Message } from '../types';
 
 const TypingIndicator = () => (
   <div className="chat-message flex gap-3 p-4">
@@ -63,9 +63,7 @@ export const ChatPanel = () => {
     Array.from(files).forEach(file => {
       const reader = new FileReader();
       reader.onload = (ev) => {
-        if (ev.target?.result) {
-          setImages(prev => [...prev, ev.target!.result as string]);
-        }
+        if (ev.target?.result) setImages(prev => [...prev, ev.target!.result as string]);
       };
       reader.readAsDataURL(file);
     });
@@ -76,7 +74,6 @@ export const ChatPanel = () => {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary">
@@ -84,26 +81,18 @@ export const ChatPanel = () => {
             <h2 className="text-xl font-semibold text-accent-blue mb-2">Trading Strategy AI</h2>
             <p className="text-center max-w-md">Describe your trading idea in natural language. I'll research it, build a strategy, backtest it, and generate MT5 code.</p>
             <div className="mt-6 grid grid-cols-2 gap-3 text-sm">
-              <div className="bg-bg-secondary border border-border rounded-lg p-3 cursor-pointer hover:border-accent-blue/50 transition-colors"
-                onClick={() => setInput('Create a trend following strategy using EMA crossover on EURUSD H1 with RSI filter')}>
-                <div className="text-accent-blue font-medium">📊 Trend Following</div>
-                <div className="text-text-muted text-xs mt-1">EMA crossover + RSI filter</div>
-              </div>
-              <div className="bg-bg-secondary border border-border rounded-lg p-3 cursor-pointer hover:border-accent-blue/50 transition-colors"
-                onClick={() => setInput('Mean reversion strategy on GBPUSD using Bollinger Bands and RSI on H4')}>
-                <div className="text-accent-green font-medium">🔄 Mean Reversion</div>
-                <div className="text-text-muted text-xs mt-1">Bollinger Bands + RSI</div>
-              </div>
-              <div className="bg-bg-secondary border border-border rounded-lg p-3 cursor-pointer hover:border-accent-blue/50 transition-colors"
-                onClick={() => setInput('Breakout strategy on XAUUSD daily with ATR-based stop loss and volume confirmation')}>
-                <div className="text-accent-yellow font-medium">💥 Breakout</div>
-                <div className="text-text-muted text-xs mt-1">ATR stop + Volume</div>
-              </div>
-              <div className="bg-bg-secondary border border-border rounded-lg p-3 cursor-pointer hover:border-accent-blue/50 transition-colors"
-                onClick={() => setInput('Scalping strategy on EURUSD M15 using MACD and stochastic with tight stop loss')}>
-                <div className="text-accent-purple font-medium">⚡ Scalping</div>
-                <div className="text-text-muted text-xs mt-1">MACD + Stochastic</div>
-              </div>
+              {[
+                { title: '📊 Trend Following', desc: 'EMA crossover + RSI filter', input: 'Create a trend following strategy using EMA crossover on EURUSD H1 with RSI filter' },
+                { title: '🔄 Mean Reversion', desc: 'Bollinger Bands + RSI', input: 'Mean reversion strategy on GBPUSD using Bollinger Bands and RSI on H4' },
+                { title: '💥 Breakout', desc: 'ATR stop + Volume', input: 'Breakout strategy on XAUUSD daily with ATR-based stop loss and volume confirmation' },
+                { title: '⚡ Scalping', desc: 'MACD + Stochastic', input: 'Scalping strategy on EURUSD M15 using MACD and stochastic with tight stop loss' },
+              ].map((item, i) => (
+                <div key={i} className="bg-bg-secondary border border-border rounded-lg p-3 cursor-pointer hover:border-accent-blue/50 transition-colors"
+                  onClick={() => setInput(item.input)}>
+                  <div className="text-accent-blue font-medium">{item.title}</div>
+                  <div className="text-text-muted text-xs mt-1">{item.desc}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -111,8 +100,6 @@ export const ChatPanel = () => {
         {isProcessing && <TypingIndicator />}
         <div ref={messagesEndRef} />
       </div>
-
-      {/* Image previews */}
       {images.length > 0 && (
         <div className="px-4 pb-2 flex gap-2 flex-wrap">
           {images.map((img, i) => (
@@ -123,29 +110,16 @@ export const ChatPanel = () => {
           ))}
         </div>
       )}
-
-      {/* Input */}
       <div className="border-t border-border p-4">
         <div className="flex gap-2 items-end">
           <button onClick={() => fileInputRef.current?.click()}
-            className="p-2 rounded-lg bg-bg-secondary border border-border hover:border-accent-blue/50 transition-colors text-text-secondary"
-            title="Upload image">
-            📎
-          </button>
+            className="p-2 rounded-lg bg-bg-secondary border border-border hover:border-accent-blue/50 transition-colors text-text-secondary" title="Upload image">📎</button>
           <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
             placeholder="Describe your trading idea..."
-            className="flex-1 bg-bg-secondary border border-border rounded-lg p-3 text-sm resize-none focus:outline-none focus:border-accent-blue/50 min-h-[44px] max-h-[120px]"
-            rows={1}
-          />
-          <button onClick={handleSend}
-            disabled={!input.trim() && images.length === 0}
-            className="p-3 rounded-lg bg-accent-blue text-white font-medium hover:bg-accent-blue/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-            Send
-          </button>
+            className="flex-1 bg-bg-secondary border border-border rounded-lg p-3 text-sm resize-none focus:outline-none focus:border-accent-blue/50 min-h-[44px] max-h-[120px]" rows={1} />
+          <button onClick={handleSend} disabled={!input.trim() && images.length === 0}
+            className="p-3 rounded-lg bg-accent-blue text-white font-medium hover:bg-accent-blue/80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">Send</button>
         </div>
       </div>
     </div>

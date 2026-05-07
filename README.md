@@ -2,6 +2,14 @@
 
 AI-powered desktop platform for trading strategy research via natural language. Chat with an AI agent that understands your trading ideas, backtests them, mutates them to find better variants, and generates MT5 Expert Advisor code.
 
+## Download
+
+### Windows
+Download the latest release: [TradingStrategyAI-Setup.exe](https://github.com/crazycompanyinc/trading-strategy-ai-platform/releases/latest)
+
+- **Installer (NSIS)**: `TradingStrategyAI-Setup-x.x.x.exe` - Full installer with shortcuts
+- **Portable**: `TradingStrategyAI-Portable-x.x.x.exe` - No installation required, just run
+
 ## Features
 
 - **Natural Language → Strategy**: Describe your trading idea in plain English (or Spanish!) and get a structured trading strategy
@@ -11,6 +19,43 @@ AI-powered desktop platform for trading strategy research via natural language. 
 - **Robustness Testing**: Monte Carlo simulation, walk-forward analysis, sensitivity analysis, overfitting detection
 - **MT5 Code Export**: Generates complete, compilable MQL5 Expert Advisor code
 - **Beautiful Reports**: HTML reports with equity curves, trade logs, and metric dashboards
+
+## Quick Start
+
+### Run from source
+
+#### Backend
+```bash
+cd backend
+pip install -r requirements.txt
+python main.py
+```
+Backend runs on http://localhost:8000
+
+#### Frontend (Development)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Build Windows .exe
+
+#### Option 1: GitHub Actions (Recommended)
+1. Push a tag: `git tag v1.0.0 && git push origin v1.0.0`
+2. GitHub Actions automatically builds the installer
+3. Find the .exe in the Releases page
+
+#### Option 2: Build on Windows
+```cmd
+build-windows.bat
+```
+
+#### Option 3: Build on Linux (requires wine)
+```bash
+sudo apt install wine
+./build.sh
+```
 
 ## Architecture
 
@@ -33,29 +78,9 @@ trading-strategy-ai-platform/
 │   │   ├── types/       # TypeScript types
 │   │   └── utils/       # API client
 │   └── public/          # Static assets
-└── docs/                # Documentation
-```
-
-## Quick Start
-
-### Backend
-
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-python main.py
-```
-
-Backend runs on http://localhost:8000
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
+├── .github/workflows/   # CI/CD for Windows builds
+├── build-windows.bat    # Windows build script
+└── build.sh             # Linux/Mac build script
 ```
 
 ## API Endpoints
@@ -90,6 +115,13 @@ The genetic algorithm evolves strategies through:
 - Condition modification
 - Risk parameter mutation
 - Crossover between strategies
+
+## Tech Stack
+
+- **Backend**: Python, FastAPI, NumPy, Pandas, Pydantic
+- **Frontend**: Electron, React 18, TypeScript, TailwindCSS, Recharts, Zustand
+- **Build**: electron-builder (NSIS installer + portable)
+- **CI/CD**: GitHub Actions
 
 ## License
 
