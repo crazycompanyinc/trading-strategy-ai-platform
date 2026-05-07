@@ -122,35 +122,38 @@ function findPython() {
 function runCmd(cmd, args, opts) {
   return new Promise((resolve, reject) => {
     log(`Running: ${cmd} ${args.join(' ')}`);
-    const p = spawn(cmd, args, { windowsHide: true, timeout: 300000, ...opts });
+    const p = spawn(cmd, args, { windowsHide: true, timeout: 600000, ...opts });
     let out = '', err = '';
     p.stdout.on('data', d => { out += d.toString(); log(d.toString().trim()); });
-    p.stderr.on('data', d => { err += d.toString(); log('pip: ' + d.toString().trim()); });
-    p.on('close', code => code === 0 ? resolve(out) : reject(new Error(`exit ${code}: ${err||out}`)));
+    p.stderr.on('data', d => { err += d.toString(); log(d.toString().trim()); });
+    p.on('close', code => {
+      if (code === 0) resolve(out);
+      else reject(new Error(`exit ${code}: ${(err||out).slice(-200)}`));
+    });
     p.on('error', reject);
   });
 }
 
 async function installDeps(backendDir, pythonCmd) {
   const req = path.join(backendDir, 'requirements.txt');
-  if (!fs.existsSync(req)) { log('No requirements.txt, skipping'); return; }
+  if (!fs.existsSync(req)) { log('No requirements.txt, skipping'); return true; }
 
-  log('Installing Python dependencies...');
-  log('Python: ' + pythonCmd);
-  log('Requirements: ' + req);
+  log('Installing Python dependencies (this may take a few minutes on first run)...');
 
-  // First ensure pip is available
+  // Ensure pip
   try {
-    await runCmd(pythonCmd, ['-m', 'pip', '--version'], { timeout: 10000 });
+    await runCmd(pythonCmd, ['-m', 'pip', '--version'], { timeout: 15000 });
   } catch(e) {
-    log('pip not found, trying ensurepip...');
-    try { await runCmd(pythonCmd, ['-m', 'ensurepip', '--upgrade'], { timeout: 30000 }); } catch(e2) { logErr('ensurepip failed: ' + e2.message); }
+    log('pip not found, running ensurepip...');
+    try { await runCmd(pythonCmd, ['-m', 'ensurepip', '--upgrade'], { timeout: 30000 }); }
+    catch(e2) { logErr('ensurepip failed: ' + e2.message); }
   }
 
-  // Install requirements
-  await runCmd(pythonCmd, ['-m', 'pip', 'install', '-r', req, '--no-cache-dir'], { cwd: backendDir });
+  // Install - use --prefer-binary to avoid compiling from source
+  await runCmd(pythonCmd, ['-m', 'pip', 'install', '--prefer-binary', '-r', req], { cwd: backendDir });
   log('✓ Dependencies installed successfully');
   depsInstalled = true;
+  return true;
 }
 
 // ─── Start backend ─────────────────────────────────────────────────────────────
@@ -162,16 +165,18 @@ async function startBackend() {
 
   const pythonCmd = findPython();
   if (!pythonCmd) {
-    logErr('Python NOT FOUND. Install Python 3.10+ from https://python.org and restart this app.');
+    logErr('Python NOT FOUND. Install Python 3.10+ from https://python.org and restart.');
     return;
   }
 
-  // Install deps
+  // Install deps first - BLOCKING, don't start backend until done
   if (!depsInstalled) {
     try {
       await installDeps(backendDir, pythonCmd);
     } catch(e) {
-      logErr('pip install failed: ' + e.message + '. Backend may not work.');
+      logErr('pip install FAILED: ' + e.message);
+      logErr('Backend will not start. Install deps manually: py -m pip install -r requirements.txt');
+      return; // DON'T start backend if deps failed
     }
   }
 
