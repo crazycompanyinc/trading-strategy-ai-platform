@@ -4,124 +4,67 @@ AI-powered desktop platform for trading strategy research via natural language. 
 
 ## Download
 
-### Windows
-Download the latest release: [TradingStrategyAI-Setup.exe](https://github.com/crazycompanyinc/trading-strategy-ai-platform/releases/latest)
+### Windows Portable (No Install Required)
+**[Download TradingStrategyAI-Portable-1.0.0.exe](https://github.com/crazycompanyinc/trading-strategy-ai-platform/releases/download/v1.0.0/TradingStrategyAI-Portable-1.0.0.exe)** (75 MB)
 
-- **Installer (NSIS)**: `TradingStrategyAI-Setup-x.x.x.exe` - Full installer with shortcuts
-- **Portable**: `TradingStrategyAI-Portable-x.x.x.exe` - No installation required, just run
+Just download and run! No installation needed.
+
+### Build Installer from Source
+
+For the full NSIS installer with shortcuts and uninstaller:
+```cmd
+git clone https://github.com/crazycompanyinc/trading-strategy-ai-platform.git
+cd trading-strategy-ai-platform
+build-windows.bat
+```
+Output: `frontend\dist\TradingStrategyAI-Setup-1.0.0.exe`
 
 ## Features
 
-- **Natural Language → Strategy**: Describe your trading idea in plain English (or Spanish!) and get a structured trading strategy
-- **Image Analysis**: Upload charts, screenshots, or hand-drawn diagrams to complement your explanation
-- **Automated Backtesting**: Executes strategies on data with comprehensive metrics (Sharpe, Sortino, Calmar, Omega, etc.)
-- **Genetic Mutation**: Evolves your strategy using genetic algorithms to find more profitable variants
-- **Robustness Testing**: Monte Carlo simulation, walk-forward analysis, sensitivity analysis, overfitting detection
+- **Natural Language to Strategy**: Describe your trading idea in plain English or Spanish
+- **Image Upload**: Drag & drop charts/screenshots for AI analysis
+- **Automated Backtesting**: 25+ metrics (Sharpe, Sortino, Calmar, Omega, etc.)
+- **Genetic Mutation**: Evolves strategies via genetic algorithms
+- **Robustness Testing**: Monte Carlo, walk-forward, sensitivity analysis, overfitting detection
 - **MT5 Code Export**: Generates complete, compilable MQL5 Expert Advisor code
-- **Beautiful Reports**: HTML reports with equity curves, trade logs, and metric dashboards
+- **HTML Reports**: Beautiful reports with equity curves and trade logs
 
 ## Quick Start
 
-### Run from source
-
-#### Backend
+### Backend
 ```bash
 cd backend
 pip install -r requirements.txt
 python main.py
 ```
-Backend runs on http://localhost:8000
+Runs on http://localhost:8000
 
-#### Frontend (Development)
+### Frontend (Development)
 ```bash
 cd frontend
-npm install
+npm install --legacy-peer-deps
 npm run dev
 ```
 
-### Build Windows .exe
-
-#### Option 1: GitHub Actions (Recommended)
-1. Push a tag: `git tag v1.0.0 && git push origin v1.0.0`
-2. GitHub Actions automatically builds the installer
-3. Find the .exe in the Releases page
-
-#### Option 2: Build on Windows
-```cmd
-build-windows.bat
-```
-
-#### Option 3: Build on Linux (requires wine)
-```bash
-sudo apt install wine
-./build.sh
-```
-
 ## Architecture
-
-```
-trading-strategy-ai-platform/
-├── backend/
-│   ├── agent/           # NLP trading agent
-│   ├── strategy/        # Strategy IR models + parser
-│   ├── backtester/      # Backtesting engine
-│   ├── mutator/         # Genetic mutation engine
-│   ├── mt5/             # MQL5 code generator
-│   ├── reports/         # HTML report generator
-│   ├── api/             # FastAPI routes
-│   └── tests/           # Test suite
-├── frontend/
-│   ├── electron/        # Electron main process
-│   ├── src/
-│   │   ├── components/  # React components
-│   │   ├── stores/      # Zustand state management
-│   │   ├── types/       # TypeScript types
-│   │   └── utils/       # API client
-│   └── public/          # Static assets
-├── .github/workflows/   # CI/CD for Windows builds
-├── build-windows.bat    # Windows build script
-└── build.sh             # Linux/Mac build script
-```
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/chat` | POST | Process natural language trading idea |
-| `/api/backtest` | POST | Run backtest for a strategy |
-| `/api/mutate` | POST | Evolve strategy via genetic algorithm |
-| `/api/robustness` | POST | Run robustness tests |
-| `/api/export/mt5` | POST | Generate MQL5 code |
-| `/api/report` | POST | Generate HTML report |
-| `/ws/{session_id}` | WebSocket | Real-time streaming chat |
-
-## Backtest Metrics
-
-The platform calculates 25+ metrics including:
-
-- Total Return, Sharpe Ratio, Sortino Ratio
-- Max Drawdown, Calmar Ratio, Omega Ratio
-- Win Rate, Profit Factor, Expectancy
-- Recovery Factor, Avg Win/Loss, Largest Win/Loss
-- Max Consecutive Wins/Losses
-- Monte Carlo VaR, CVaR
-- Walk-Forward Consistency Score
-
-## Strategy Mutation
-
-The genetic algorithm evolves strategies through:
-- Parameter perturbation
-- Indicator swap/add/remove
-- Condition modification
-- Risk parameter mutation
-- Crossover between strategies
-
-## Tech Stack
 
 - **Backend**: Python, FastAPI, NumPy, Pandas, Pydantic
 - **Frontend**: Electron, React 18, TypeScript, TailwindCSS, Recharts, Zustand
 - **Build**: electron-builder (NSIS installer + portable)
 - **CI/CD**: GitHub Actions
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Backend API | FastAPI, WebSocket |
+| Strategy Engine | Custom (backtrader-like) |
+| Mutation Engine | Genetic algorithms (DEAP-style) |
+| MT5 Generator | MQL5 codegen |
+| Desktop App | Electron 32 + React 18 |
+| State Management | Zustand |
+| Charts | Recharts |
+| Styling | TailwindCSS |
 
 ## License
 
