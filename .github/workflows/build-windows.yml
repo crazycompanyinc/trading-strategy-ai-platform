@@ -9,7 +9,12 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    
+    env:
+      CI: false
+      GENERATE_SOURCEMAP: false
+      ELECTRON_BUILDER_CACHE: true
     
     steps:
       - name: Checkout
@@ -20,46 +25,45 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
         working-directory: ./frontend
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-        shell: pwsh
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+        shell: cmd
+        timeout-minutes: 15
 
       - name: Build React app
         working-directory: ./frontend
         run: npx react-scripts build
-        env:
-          CI: false
-          GENERATE_SOURCEMAP: false
-        shell: pwsh
+        shell: cmd
+        timeout-minutes: 10
 
-      - name: Build Electron NSIS installer
+      - name: Install dev dependencies (electron-builder)
         working-directory: ./frontend
-        run: npx electron-builder --win nsis --publish never
-        env:
-          CI: false
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
+        run: npm install electron electron-builder --save-dev --legacy-peer-deps --no-audit --no-fund
+        shell: cmd
+        timeout-minutes: 10
 
-      - name: Build Electron portable
+      - name: Build Windows installer (NSIS)
         working-directory: ./frontend
-        run: npx electron-builder --win portable --publish never
+        run: npx electron-builder --win nsis
+        shell: cmd
+        timeout-minutes: 15
         env:
-          CI: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: windows-build
+          name: windows-installer
           path: frontend/dist/*.exe
-          retention-days: 30
+          retention-days: 7
 
-      - name: Create Release
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: frontend/dist/*.exe
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
