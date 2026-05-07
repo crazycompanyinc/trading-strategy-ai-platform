@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "AI-powered desktop platform for trading strategy research via natural language",
   "main": "electron/main.js",
+  "homepage": "./",
   "scripts": {
     "start": "electron .",
     "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && electron .\"",
@@ -10,7 +11,7 @@
     "build": "react-scripts build && electron-builder --win",
     "build:react": "react-scripts build",
     "build:win": "react-scripts build && electron-builder --win nsis",
-    "build:win:portable": "react-scripts build && electron-builder --win portable",
+    "build:portable": "react-scripts build && electron-builder --win portable",
     "test": "react-scripts test",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -45,17 +46,33 @@
     "appId": "com.crazycompanyinc.trading-strategy-ai",
     "productName": "Trading Strategy AI",
     "copyright": "Copyright (c) 2026 crazycompanyinc",
+    "extends": null,
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "assets"
     },
     "files": [
-      "build/**/*",
       "electron/**/*",
-      "package.json"
+      "build/**/*",
+      "!**/*.map",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!**/._*",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!**/{appveyor.yml,.travis.yml,circle.yml}",
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
     ],
+    "asar": true,
     "win": {
       "target": ["nsis", "portable"],
       "publisherName": "crazycompanyinc",
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false,
       "artifactName": "TradingStrategyAI-${version}.${ext}"
     },
     "nsis": {

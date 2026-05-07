@@ -4,13 +4,23 @@ const fs = require('fs');
 
 let mainWindow;
 
+function getIndexHtmlPath() {
+  // In development: react build is at ../build/ relative to this file
+  // In production (packaged): electron-builder puts build/ at the root of the asar, alongside electron/
+  const isDev = !app.isPackaged;
+  if (isDev) {
+    return path.join(__dirname, '..', 'build', 'index.html');
+  }
+  // Packaged: build/ is at the same level as electron/ inside the asar
+  return path.join(__dirname, '..', 'build', 'index.html');
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    titleBarStyle: 'hiddenInset',
     backgroundColor: '#0d1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -18,17 +28,12 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
-    icon: path.join(__dirname, '../public/icon.png'),
   });
 
-  const isDev = !app.isPackaged;
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
-  } else {
-    const indexPath = path.join(__dirname, '../build/index.html');
-    mainWindow.loadFile(indexPath);
-  }
+  const indexPath = getIndexHtmlPath();
+  console.log('Loading:', indexPath);
+  console.log('Exists:', fs.existsSync(indexPath));
+  mainWindow.loadFile(indexPath);
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -41,7 +46,6 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-// IPC handlers
 ipcMain.handle('save-file', async (event, { content, filename }) => {
   const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
     defaultPath: filename,
