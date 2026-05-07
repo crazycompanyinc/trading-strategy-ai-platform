@@ -6,7 +6,7 @@ echo ============================================
 echo.
 echo [1/4] Installing frontend dependencies...
 cd frontend
-call npm ci
+call npm install --legacy-peer-deps --no-audit --no-fund
 if %ERRORLEVEL% neq 0 (
     echo ERROR: npm install failed
     exit /b 1
