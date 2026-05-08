@@ -32,7 +32,7 @@ from mutator.genetic import GeneticMutator
 from mt5.generator import MT5Generator
 from reports.generator import ReportGenerator
 
-app = FastAPI(title="Trading Strategy AI Platform", version="2.3.0")
+app = FastAPI(title="Trading Strategy AI Platform", version="2.3.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 agent = TradingAgent()
@@ -53,7 +53,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "app": "Trading Strategy AI Platform", "version": "2.3.0"}
+    return {"status": "ok", "app": "Trading Strategy AI Platform", "version": "2.3.1"}
 
 
 @app.get("/health")
