@@ -214,10 +214,11 @@ class LLMClient:
 
 
 class TradingAgent:
-    """Universal trading agent — LLM via function calling handles everything."""
+    """Universal trading agent — LLM via function calling, with full local fallback."""
 
     def __init__(self):
         self.llm = LLMClient()
+        self.parser = StrategyParser()
         self.backtester = BacktestEngine()
         self.mutator = GeneticMutator()
         self.mt5_gen = MT5Generator()
@@ -238,23 +239,35 @@ class TradingAgent:
         user_msg = message + (f"\n[{len(images)} images]" if images else "")
         messages.append({"role": "user", "content": user_msg})
 
-        # ── Tool execution loop ──
+        # ── Try LLM-first flow ──
+        if self.llm.available:
+            llm_result = await self._llm_flow(message, messages, result)
+            if llm_result:
+                return llm_result
+
+        # ── Fallback: local parser + full pipeline ──
+        print("[Agent] Using local fallback pipeline")
+        return await self._local_flow(message, result)
+
+    async def _llm_flow(self, message: str, messages: List[Dict], result: Dict) -> Optional[Dict]:
+        """LLM tool execution loop. Returns result dict or None on failure."""
         strategy_dict = None
         backtest_results = None
         mt5_code = None
         mutation_results = None
         llm_text = ""
 
-        for iteration in range(8):  # max 8 tool calls
+        for iteration in range(8):
             resp = await self.llm.chat(messages, tools=TOOLS)
             if "error" in resp:
                 print(f"[Agent] LLM error: {resp.get('message')}")
+                return None
 
             tool_calls = self.llm.extract_tool_calls(resp)
             llm_text = self.llm.extract_content(resp)
 
             if not tool_calls:
-                break  # LLM done
+                break
 
             messages.append({"role": "assistant", "content": llm_text, "tool_calls": tool_calls})
 
@@ -313,9 +326,9 @@ class TradingAgent:
                             "best_sharpe": best[0]["metrics"].get("sharpe_ratio") if best else None}
 
                 messages.append({"role": "tool", "tool_call_id": tc.get("id", f"tc_{iteration}"),
-                                 "content": json.dumps(tool_result)})
+                                 "content": json.dumps(tool_result, allow_nan=False, default=str)})
 
-        # ── Build final response ──
+        # Build final response
         parts = []
         if llm_text and "LLM error" not in llm_text and "LLM unavailable" not in llm_text:
             parts.append(llm_text)
@@ -324,6 +337,40 @@ class TradingAgent:
             parts.append(f"Type: {strategy_dict.get('type')} | Instruments: {', '.join(strategy_dict.get('instruments', []))}")
             parts.append(f"Indicators: {len(strategy_dict.get('indicators', []))} | Entry signals: {len(strategy_dict.get('entry_signals', []))}")
 
+        self._append_results(parts, backtest_results, mutation_results, mt5_code)
+
+        result["response"] = "\n".join(parts) if parts else "Strategy processed successfully."
+        result["strategy"] = strategy_dict
+        result["backtest_results"] = backtest_results
+        result["mt5_code"] = mt5_code
+        result["mutation_results"] = mutation_results
+        return result
+
+    async def _local_flow(self, message: str, result: Dict) -> Dict:
+        """Full local pipeline: parse -> backtest -> report."""
+        # 1. Parse
+        ir = self.parser.parse(message)
+        strategy_dict = ir.model_dump(mode="json")
+        parts = [
+            f"## Strategy: {strategy_dict.get('name', 'Custom')}",
+            f"Type: {strategy_dict.get('type')} | Instruments: {', '.join(strategy_dict.get('instruments', []))}",
+            f"Indicators: {len(strategy_dict.get('indicators', []))} | Entry signals: {len(strategy_dict.get('entry_signals', []))} | Exit signals: {len(strategy_dict.get('exit_signals', []))}",
+        ]
+
+        # 2. Backtest (run in thread pool to avoid blocking)
+        symbol = strategy_dict.get("instruments", ["EURUSD"])[0]
+        backtest_results = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: self.backtester.run(strategy=strategy_dict, symbol=symbol))
+
+        self._append_results(parts, backtest_results, None, None)
+
+        result["response"] = "\n".join(parts) if parts else "Strategy processed successfully."
+        result["strategy"] = strategy_dict
+        result["backtest_results"] = backtest_results
+        return result
+
+    @staticmethod
+    def _append_results(parts: list, backtest_results=None, mutation_results=None, mt5_code=None):
         if backtest_results:
             m = backtest_results.get("metrics", {})
             parts.append("\n## Backtest Results")
@@ -334,11 +381,14 @@ class TradingAgent:
             ]:
                 v = m.get(key)
                 if v is not None:
-                    parts.append(f"  - {label}: {v:.2f}{suffix}" if isinstance(v, float) else f"  - {label}: {v}{suffix}")
+                    if isinstance(v, float):
+                        parts.append(f"  - {label}: {v:.2f}{suffix}")
+                    else:
+                        parts.append(f"  - {label}: {v}{suffix}")
 
         if mutation_results:
             best = mutation_results.get("best_strategies", [])
-            parts.append(f"\n## Genetic Evolution")
+            parts.append("\n## Genetic Evolution")
             parts.append(f"  Evaluated: {mutation_results.get('total_evaluated')} | Generations: {mutation_results.get('generations_run')}")
             if best:
                 bm = best[0].get("metrics", {})
@@ -347,13 +397,6 @@ class TradingAgent:
         if mt5_code:
             parts.append(f"\n## MQL5 Code ({len(mt5_code)} chars)")
             parts.append(f"```mql5\n{mt5_code[:1500]}...\n```")
-
-        result["response"] = "\n".join(parts) if parts else "Strategy processed successfully."
-        result["strategy"] = strategy_dict
-        result["backtest_results"] = backtest_results
-        result["mt5_code"] = mt5_code
-        result["mutation_results"] = mutation_results
-        return result
 
     def _ensure_strategy(self, strat: dict, original: str) -> dict:
         """Normalize LLM-generated strategy, fill gaps from local parser if needed."""

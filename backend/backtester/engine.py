@@ -522,16 +522,23 @@ class BacktestEngine:
 
     def _calculate_metrics(self, trades, equity_curve, initial_capital, data):
         if not trades:
-            return {"total_return": 0, "sharpe_ratio": 0, "sortino_ratio": 0, "max_drawdown": 0, "win_rate": 0, "profit_factor": 0, "total_trades": 0, "avg_trade": 0, "calmar_ratio": 0, "omega_ratio": 0, "expectancy": 0}
+            return {"total_return": 0, "sharpe_ratio": 0, "sortino_ratio": 0, "max_drawdown": 0,
+                    "win_rate": 0, "profit_factor": 0, "total_trades": 0, "avg_trade": 0,
+                    "calmar_ratio": 0, "omega_ratio": 0, "expectancy": 0}
         returns = [t.return_pct for t in trades]
         wins = [t for t in trades if t.is_win]
         losses = [t for t in trades if t.is_loss]
-        total_return = (equity_curve[-1] - initial_capital) / initial_capital if equity_curve else 0
+        gross_profit = sum(t.pnl for t in wins) if wins else 0
+        gross_loss = abs(sum(t.pnl for t in losses)) if losses else 0
+        net_profit = gross_profit - gross_loss
+        # Total return from equity curve
+        if equity_curve and len(equity_curve) > 0:
+            total_return = (equity_curve[-1] - initial_capital) / initial_capital
+        else:
+            total_return = 0
         win_rate = len(wins) / len(trades) if trades else 0
         avg_trade = sum(returns) / len(returns) if returns else 0
-        gross_profit = sum(t.pnl for t in wins) if wins else 0
-        gross_loss = abs(sum(t.pnl for t in losses)) if losses else 1
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else (float("inf") if gross_profit > 0 else 0)
         if len(returns) > 1:
             arr = np.array(returns)
             std = np.std(arr, ddof=1)
@@ -539,15 +546,19 @@ class BacktestEngine:
             downside = [r for r in returns if r < 0]
             dstd = np.std(downside, ddof=1) if len(downside) > 1 else 0
             sortino = (np.mean(arr) / dstd * math.sqrt(252)) if dstd > 0 else 0
-        else: sharpe = sortino = 0
+        else:
+            sharpe = sortino = 0
         max_dd = self._max_drawdown(equity_curve)
         calmar = (total_return / max_dd) if max_dd > 0 else 0
+        recovery = (total_return / max_dd) if max_dd > 0 else 0
+        # Omega ratio: gains_above / losses_below threshold=0
         if returns:
             threshold = 0
             gains_above = sum(r - threshold for r in returns if r > threshold)
             losses_below = sum(threshold - r for r in returns if r < threshold)
-            omega = gains_above / losses_below if losses_below > 0 else float("inf")
-        else: omega = 0
+            omega = gains_above / losses_below if losses_below > 0 else 0
+        else:
+            omega = 0
         avg_win = sum(t.pnl for t in wins) / len(wins) if wins else 0
         avg_loss = sum(t.pnl for t in losses) / len(losses) if losses else 0
         expectancy = (win_rate * avg_win + (1 - win_rate) * avg_loss)
@@ -556,17 +567,32 @@ class BacktestEngine:
         largest_win = max(t.pnl for t in trades) if trades else 0
         largest_loss = min(t.pnl for t in trades) if trades else 0
         max_cw, max_cl = self._consecutive_stats(trades)
-        recovery = total_return / max_dd if max_dd > 0 else 0
         return {
-            "total_return": round(total_return * 100, 2), "sharpe_ratio": round(sharpe, 4), "sortino_ratio": round(sortino, 4),
-            "max_drawdown": round(max_dd * 100, 2), "win_rate": round(win_rate * 100, 2), "profit_factor": round(profit_factor, 4),
-            "total_trades": len(trades), "winning_trades": len(wins), "losing_trades": len(losses),
-            "avg_trade": round(avg_trade * 100, 4), "avg_win": round(avg_win, 4), "avg_loss": round(avg_loss, 4),
-            "avg_win_pct": round(avg_win_pct, 4), "avg_loss_pct": round(avg_loss_pct, 4),
-            "largest_win": round(largest_win, 4), "largest_loss": round(largest_loss, 4),
-            "calmar_ratio": round(calmar, 4), "omega_ratio": round(omega, 4), "expectancy": round(expectancy, 4),
-            "recovery_factor": round(recovery, 4), "max_consecutive_wins": max_cw, "max_consecutive_losses": max_cl,
-            "gross_profit": round(gross_profit, 4), "gross_loss": round(gross_loss, 4), "net_profit": round(gross_profit - gross_loss, 4),
+            "total_return": round(total_return * 100, 2) or 0.0,
+            "sharpe_ratio": round(float(sharpe), 4) or 0.0,
+            "sortino_ratio": round(float(sortino), 4) or 0.0,
+            "max_drawdown": round(max_dd * 100, 2) or 0.0,
+            "win_rate": round(win_rate * 100, 2) or 0.0,
+            "profit_factor": round(float(profit_factor), 4) if profit_factor != float("inf") else 0,
+            "total_trades": len(trades),
+            "winning_trades": len(wins),
+            "losing_trades": len(losses),
+            "avg_trade": round(avg_trade * 100, 4),
+            "avg_win": round(avg_win, 4),
+            "avg_loss": round(avg_loss, 4),
+            "avg_win_pct": round(avg_win_pct, 4),
+            "avg_loss_pct": round(avg_loss_pct, 4),
+            "largest_win": round(largest_win, 4),
+            "largest_loss": round(largest_loss, 4),
+            "calmar_ratio": round(float(calmar), 4),
+            "omega_ratio": round(float(omega), 4),
+            "expectancy": round(expectancy, 4),
+            "recovery_factor": round(float(recovery), 4),
+            "max_consecutive_wins": max_cw,
+            "max_consecutive_losses": max_cl,
+            "gross_profit": round(gross_profit, 4),
+            "gross_loss": round(gross_loss, 4),
+            "net_profit": round(net_profit, 4),
         }
 
     def _max_drawdown(self, equity_curve):

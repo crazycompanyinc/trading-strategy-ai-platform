@@ -154,7 +154,7 @@ class StrategyIR(BaseModel):
     mutation_generation: int = 0
 
     def to_dict(self) -> dict:
-        return self.model_dump()
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_dict(cls, data: dict) -> StrategyIR:
