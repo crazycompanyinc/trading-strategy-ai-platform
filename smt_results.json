@@ -1,0 +1,298 @@
+{
+  "best_strategy": {
+    "name": "SMT_Sweep_CHoCH_SL25TP50",
+    "description": "Liquidity Sweep + CHoCH | SL:25 TP:50",
+    "entry_signals": [
+      {
+        "type": "buy",
+        "condition": {
+          "logic": "AND",
+          "conditions": [
+            {
+              "left_operand": "liquidity_sweep_bullish",
+              "operator": "==",
+              "right_operand": "true"
+            },
+            {
+              "left_operand": "choch_bullish",
+              "operator": "==",
+              "right_operand": "true"
+            }
+          ]
+        },
+        "confidence": 0.85
+      },
+      {
+        "type": "sell",
+        "condition": {
+          "logic": "AND",
+          "conditions": [
+            {
+              "left_operand": "liquidity_sweep_bearish",
+              "operator": "==",
+              "right_operand": "true"
+            },
+            {
+              "left_operand": "choch_bearish",
+              "operator": "==",
+              "right_operand": "true"
+            }
+          ]
+        },
+        "confidence": 0.85
+      }
+    ],
+    "exit_signals": [
+      {
+        "type": "close_long",
+        "condition": {
+          "logic": "OR",
+          "conditions": [
+            {
+              "left_operand": "choch_bearish",
+              "operator": "==",
+              "right_operand": "true"
+            },
+            {
+              "left_operand": "position_bars_held",
+              "operator": ">",
+              "right_operand": "20"
+            }
+          ]
+        },
+        "confidence": 0.7
+      },
+      {
+        "type": "close_short",
+        "condition": {
+          "logic": "OR",
+          "conditions": [
+            {
+              "left_operand": "choch_bullish",
+              "operator": "==",
+              "right_operand": "true"
+            },
+            {
+              "left_operand": "position_bars_held",
+              "operator": ">",
+              "right_operand": "20"
+            }
+          ]
+        },
+        "confidence": 0.7
+      }
+    ],
+    "risk_management": {
+      "stop_loss": 25,
+      "take_profit": 50
+    }
+  },
+  "best_metrics": {
+    "total_return": 0.0,
+    "sharpe_ratio": 15.3194,
+    "sortino_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "win_rate": 80.0,
+    "profit_factor": 98.3443,
+    "total_trades": 5,
+    "winning_trades": 4,
+    "losing_trades": 1,
+    "net_profit": 0.0119,
+    "expectancy": 0.0024,
+    "omega_ratio": 98.7383,
+    "calmar_ratio": 0.0
+  },
+  "best_score": 930.1564199999998,
+  "top_10": [
+    {
+      "name": "SMT_Sweep_CHoCH_SL25TP50",
+      "score": 930.1564199999998,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 15.3194,
+        "sortino_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "win_rate": 80.0,
+        "profit_factor": 98.3443,
+        "total_trades": 5,
+        "winning_trades": 4,
+        "losing_trades": 1,
+        "net_profit": 0.0119,
+        "expectancy": 0.0024,
+        "omega_ratio": 98.7383,
+        "calmar_ratio": 0.0
+      }
+    },
+    {
+      "name": "SMT_Sweep_CHoCH_SL20TP40",
+      "score": 810.43302,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 16.2516,
+        "sortino_ratio": 0.0,
+        "max_drawdown": 0.0,
+        "win_rate": 80.0,
+        "profit_factor": 81.9508,
+        "total_trades": 5,
+        "winning_trades": 4,
+        "losing_trades": 1,
+        "net_profit": 0.0099,
+        "expectancy": 0.002,
+        "omega_ratio": 82.2643,
+        "calmar_ratio": 0.0
+      }
+    },
+    {
+      "name": "SMT_Sweep_OB_SL30TP60",
+      "score": 467.5244,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 11.1852,
+        "sortino_ratio": 27.0086,
+        "max_drawdown": 0.0,
+        "win_rate": 79.05,
+        "profit_factor": 9.531,
+        "total_trades": 253,
+        "winning_trades": 200,
+        "losing_trades": 53,
+        "net_profit": 0.4652,
+        "expectancy": 0.0018,
+        "omega_ratio": 9.6,
+        "calmar_ratio": -0.9231
+      }
+    },
+    {
+      "name": "SMT_Sweep_OB_SL35TP70",
+      "score": 449.7827,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 10.5459,
+        "sortino_ratio": 25.0586,
+        "max_drawdown": 0.0,
+        "win_rate": 79.05,
+        "profit_factor": 9.6519,
+        "total_trades": 253,
+        "winning_trades": 200,
+        "losing_trades": 53,
+        "net_profit": 0.4745,
+        "expectancy": 0.0019,
+        "omega_ratio": 9.7224,
+        "calmar_ratio": -0.8462
+      }
+    },
+    {
+      "name": "SMT_Sweep_OB_SL30TP90",
+      "score": 449.6432,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 9.6773,
+        "sortino_ratio": 27.9758,
+        "max_drawdown": 0.0,
+        "win_rate": 78.66,
+        "profit_factor": 9.5259,
+        "total_trades": 253,
+        "winning_trades": 199,
+        "losing_trades": 54,
+        "net_profit": 0.4905,
+        "expectancy": 0.0019,
+        "omega_ratio": 9.6173,
+        "calmar_ratio": -0.8333
+      }
+    },
+    {
+      "name": "SMT_Sweep_OB_SL40TP80",
+      "score": 447.72670000000005,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 10.2054,
+        "sortino_ratio": 24.2421,
+        "max_drawdown": 0.0,
+        "win_rate": 78.97,
+        "profit_factor": 10.2184,
+        "total_trades": 252,
+        "winning_trades": 199,
+        "losing_trades": 53,
+        "net_profit": 0.484,
+        "expectancy": 0.0019,
+        "omega_ratio": 10.247,
+        "calmar_ratio": -0.8333
+      }
+    },
+    {
+      "name": "SMT_Sweep_OB_SL25TP50",
+      "score": 447.2085,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 11.5105,
+        "sortino_ratio": 27.1606,
+        "max_drawdown": 0.0,
+        "win_rate": 78.12,
+        "profit_factor": 7.5884,
+        "total_trades": 256,
+        "winning_trades": 200,
+        "losing_trades": 56,
+        "net_profit": 0.4504,
+        "expectancy": 0.0018,
+        "omega_ratio": 7.616,
+        "calmar_ratio": -1.0
+      }
+    },
+    {
+      "name": "SMT_Sweep_OB_SL20TP40",
+      "score": 441.5447,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 11.4371,
+        "sortino_ratio": 30.5017,
+        "max_drawdown": 0.0,
+        "win_rate": 76.14,
+        "profit_factor": 6.0269,
+        "total_trades": 264,
+        "winning_trades": 201,
+        "losing_trades": 63,
+        "net_profit": 0.4105,
+        "expectancy": 0.0016,
+        "omega_ratio": 6.0747,
+        "calmar_ratio": -0.9524
+      }
+    },
+    {
+      "name": "SMT_Sweep_CHoCH_SL40TP80",
+      "score": 297.38856000000004,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 7.8966,
+        "sortino_ratio": 45.468,
+        "max_drawdown": 0.0,
+        "win_rate": 60.0,
+        "profit_factor": 9.4321,
+        "total_trades": 5,
+        "winning_trades": 3,
+        "losing_trades": 2,
+        "net_profit": 0.0089,
+        "expectancy": 0.0018,
+        "omega_ratio": 8.8768,
+        "calmar_ratio": 0.0
+      }
+    },
+    {
+      "name": "SMT_Sweep_CHoCH_SL25TP75",
+      "score": 286.47569999999996,
+      "metrics": {
+        "total_return": 0.0,
+        "sharpe_ratio": 7.9316,
+        "sortino_ratio": 42.9215,
+        "max_drawdown": 0.0,
+        "win_rate": 60.0,
+        "profit_factor": 8.9604,
+        "total_trades": 5,
+        "winning_trades": 3,
+        "losing_trades": 2,
+        "net_profit": 0.0084,
+        "expectancy": 0.0017,
+        "omega_ratio": 8.4356,
+        "calmar_ratio": 0.0
+      }
+    }
+  ]
+}
