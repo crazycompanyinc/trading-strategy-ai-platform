@@ -1,71 +1,82 @@
 # Trading Strategy AI Platform
 
-AI-powered desktop platform for trading strategy research via natural language. Chat with an AI agent that understands your trading ideas, backtests them, mutates them to find better variants, and generates MT5 Expert Advisor code.
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/crazycompanyinc/trading-strategy-ai-platform?style=social)](https://github.com/crazycompanyinc/trading-strategy-ai-platform)
 
-## Download
-
-### Windows Portable (No Install Required)
-**[Download TradingStrategyAI-Portable-1.0.0.exe](https://github.com/crazycompanyinc/trading-strategy-ai-platform/releases/download/v1.0.0/TradingStrategyAI-Portable-1.0.0.exe)** (75 MB)
-
-Just download and run! No installation needed.
-
-### Build Installer from Source
-
-For the full NSIS installer with shortcuts and uninstaller:
-```cmd
-git clone https://github.com/crazycompanyinc/trading-strategy-ai-platform.git
-cd trading-strategy-ai-platform
-build-windows.bat
-```
-Output: `frontend\dist\TradingStrategyAI-Setup-1.0.0.exe`
+AI-powered desktop platform for trading strategy research via natural language. Describe your strategy in plain English — the AI parses it, generates a backtestable configuration, runs the backtest, and delivers performance metrics.
 
 ## Features
 
-- **Natural Language to Strategy**: Describe your trading idea in plain English or Spanish
-- **Image Upload**: Drag & drop charts/screenshots for AI analysis
-- **Automated Backtesting**: 25+ metrics (Sharpe, Sortino, Calmar, Omega, etc.)
-- **Genetic Mutation**: Evolves strategies via genetic algorithms
-- **Robustness Testing**: Monte Carlo, walk-forward, sensitivity analysis, overfitting detection
-- **MT5 Code Export**: Generates complete, compilable MQL5 Expert Advisor code
-- **HTML Reports**: Beautiful reports with equity curves and trade logs
+- **Natural Language Strategy Parser** — Describe strategies in any language, get structured JSON back
+- **Universal Strategy Support** — ICT concepts, price action, indicators, ML-based signals
+- **Backtesting Engine** — 10+ years of historical data, multiple timeframes
+- **Risk Management** — Position sizing, max drawdown, Kelly Criterion
+- **20+ Performance Metrics** — Sharpe, Sortino, Calmar, Win Rate, Profit Factor, and more
+- **Walk-Forward Analysis** — Prevent overfitting with out-of-sample validation
+- **Genetic Optimization** — Parameter optimization with genetic algorithms
+- **MT5 Integration** — Generate Expert Advisors for MetaTrader 5
 
 ## Quick Start
 
-### Backend
 ```bash
-cd backend
+git clone https://github.com/crazycompanyinc/trading-strategy-ai-platform.git
+cd trading-strategy-ai-platform
 pip install -r requirements.txt
 python main.py
 ```
-Runs on http://localhost:8000
 
-### Frontend (Development)
-```bash
-cd frontend
-npm install --legacy-peer-deps
-npm run dev
+## Strategy Examples
+
+```
+"Enter long when price breaks above the 20 EMA on the 4H chart,
+with RSI above 50, and place stop loss at the recent swing low.
+Take profit at 2:1 risk-reward ratio."
+```
+
+The platform converts this into a structured strategy configuration, runs the backtest, and returns:
+
+```json
+{
+  "total_return": "47.3%",
+  "sharpe_ratio": 1.82,
+  "max_drawdown": "12.1%",
+  "win_rate": "58.4%",
+  "profit_factor": 1.67,
+  "total_trades": 342
+}
 ```
 
 ## Architecture
 
-- **Backend**: Python, FastAPI, NumPy, Pandas, Pydantic
-- **Frontend**: Electron, React 18, TypeScript, TailwindCSS, Recharts, Zustand
-- **Build**: electron-builder (NSIS installer + portable)
-- **CI/CD**: GitHub Actions
+```
+src/
+├── parser/          # LLM-based natural language strategy parser
+├── backtester/      # Event-driven backtesting engine
+├── signals/         # Signal generation (ICT, indicators, ML)
+├── risk/            # Risk management module
+├── optimization/    # Genetic algorithm + Walk-Forward
+├── mt5/             # MetaTrader 5 EA generation
+└── metrics/         # Performance metrics calculation
+```
 
-## Tech Stack
+## Roadmap
 
-| Component | Technology |
-|-----------|------------|
-| Backend API | FastAPI, WebSocket |
-| Strategy Engine | Custom (backtrader-like) |
-| Mutation Engine | Genetic algorithms (DEAP-style) |
-| MT5 Generator | MQL5 codegen |
-| Desktop App | Electron 32 + React 18 |
-| State Management | Zustand |
-| Charts | Recharts |
-| Styling | TailwindCSS |
+- [x] Universal strategy parser via LLM
+- [x] Position-aware exit logic (CLOSE_LONG/CLOSE_SHORT)
+- [x] Walk-Forward Analysis
+- [ ] Multi-asset portfolio backtesting
+- [ ] Live paper trading mode
+- [ ] Web dashboard (Next.js frontend)
+
+## Contributing
+
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+Built by [ZOO](https://zoo.dev) — AI-Native Technology Company
