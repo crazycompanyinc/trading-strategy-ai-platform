@@ -394,7 +394,7 @@ class StrategyParser:
                             type=SignalType.BUY,
                             condition=ConditionGroup(logic="AND", conditions=[
                                 Condition(
-                                    left_operand="ict_fvg_bullish",
+                                    left_operand="fvg_bullish",
                                     operator=ConditionOperator.EQUAL,
                                     right_operand="true",
                                 )
@@ -407,7 +407,7 @@ class StrategyParser:
                             type=SignalType.SELL,
                             condition=ConditionGroup(logic="AND", conditions=[
                                 Condition(
-                                    left_operand="ict_fvg_bearish",
+                                    left_operand="fvg_bearish",
                                     operator=ConditionOperator.EQUAL,
                                     right_operand="true",
                                 )
@@ -422,7 +422,7 @@ class StrategyParser:
                             type=SignalType.BUY,
                             condition=ConditionGroup(logic="AND", conditions=[
                                 Condition(
-                                    left_operand="price_at_order_block_bullish",
+                                    left_operand="price_at_ob_bullish",
                                     operator=ConditionOperator.EQUAL,
                                     right_operand="true",
                                 )
@@ -435,7 +435,7 @@ class StrategyParser:
                             type=SignalType.SELL,
                             condition=ConditionGroup(logic="AND", conditions=[
                                 Condition(
-                                    left_operand="price_at_order_block_bearish",
+                                    left_operand="price_at_ob_bearish",
                                     operator=ConditionOperator.EQUAL,
                                     right_operand="true",
                                 )
@@ -449,7 +449,7 @@ class StrategyParser:
                         type=SignalType.BUY,
                         condition=ConditionGroup(logic="AND", conditions=[
                             Condition(
-                                left_operand="ict_bos_bullish",
+                                left_operand="bos_bullish",
                                 operator=ConditionOperator.EQUAL,
                                 right_operand="true",
                             )
@@ -460,7 +460,7 @@ class StrategyParser:
                         type=SignalType.SELL,
                         condition=ConditionGroup(logic="AND", conditions=[
                             Condition(
-                                left_operand="ict_bos_bearish",
+                                left_operand="bos_bearish",
                                 operator=ConditionOperator.EQUAL,
                                 right_operand="true",
                             )
@@ -474,7 +474,7 @@ class StrategyParser:
                         type=SignalType.BUY,
                         condition=ConditionGroup(logic="AND", conditions=[
                             Condition(
-                                left_operand="ict_choch_bullish",
+                                left_operand="choch_bullish",
                                 operator=ConditionOperator.EQUAL,
                                 right_operand="true",
                             )
@@ -485,7 +485,7 @@ class StrategyParser:
                         type=SignalType.SELL,
                         condition=ConditionGroup(logic="AND", conditions=[
                             Condition(
-                                left_operand="ict_choch_bearish",
+                                left_operand="choch_bearish",
                                 operator=ConditionOperator.EQUAL,
                                 right_operand="true",
                             )
@@ -521,7 +521,7 @@ class StrategyParser:
                     type=SignalType.BUY,
                     condition=ConditionGroup(logic="AND", conditions=[
                         Condition(
-                            left_operand="ict_fvg_bullish",
+                            left_operand="fvg_bullish",
                             operator=ConditionOperator.EQUAL,
                             right_operand="true",
                         )
