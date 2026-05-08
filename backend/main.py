@@ -35,12 +35,29 @@ from reports.generator import ReportGenerator
 app = FastAPI(title="Trading Strategy AI Platform", version="2.3.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-agent = TradingAgent()
-parser = StrategyParser()
-backtester = BacktestEngine()
-mutator = GeneticMutator()
-mt5_gen = MT5Generator()
-report_gen = ReportGenerator()
+# Global instances - initialized lazily
+agent = None
+parser = None
+backtester = None
+mutator = None
+mt5_gen = None
+report_gen = None
+
+def ensure_initialized():
+    global agent, parser, backtester, mutator, mt5_gen, report_gen
+    if parser is None:
+        from strategy.parser import StrategyParser
+        from backtester.engine import BacktestEngine
+        from mutator.genetic import GeneticMutator
+        from mt5.generator import MT5Generator
+        from reports.generator import ReportGenerator
+        from agent.trading_agent import TradingAgent
+        parser = StrategyParser()
+        backtester = BacktestEngine()
+        mutator = GeneticMutator()
+        mt5_gen = MT5Generator()
+        report_gen = ReportGenerator()
+        agent = TradingAgent()
 sessions: Dict[str, dict] = {}
 active_ws: Dict[str, WebSocket] = {}
 
@@ -63,11 +80,45 @@ async def health():
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    ensure_initialized()
     sid = req.session_id or str(uuid.uuid4())
     if sid not in sessions:
         sessions[sid] = {"id": sid, "created_at": datetime.now(timezone.utc).isoformat(), "history": [], "current_strategy": None}
 
-    result = await agent.process_message(req.message, req.images or [], sid, sessions)
+    # Always use local pipeline for fast responses (no LLM)
+    ir = parser.parse(req.message)
+    strategy_dict = ir.model_dump(mode="json")
+    symbol = strategy_dict.get("instruments", ["EURUSD"])[0]
+    bt_result = backtester.run(strategy=strategy_dict, symbol=symbol)
+    m = bt_result.get("metrics", {})
+    mt5_code = mt5_gen.generate(strategy_dict)
+    mt5_preview = mt5_code[:1500] + "..." if len(mt5_code) > 1500 else mt5_code
+
+    parts = [
+        f"Strategy: {strategy_dict.get('name', 'Custom')}",
+        f"Type: {strategy_dict.get('type')} | Instruments: {', '.join(strategy_dict.get('instruments', []))}",
+        f"Indicators: {len(strategy_dict.get('indicators', []))} | Entries: {len(strategy_dict.get('entry_signals', []))} | Exits: {len(strategy_dict.get('exit_signals', []))}",
+        "",
+        "Backtest Results",
+    ]
+    for label, key, suffix in [
+        ("Total Return", "total_return", "%"), ("Sharpe Ratio", "sharpe_ratio", ""),
+        ("Max Drawdown", "max_drawdown", "%"), ("Win Rate", "win_rate", "%"),
+        ("Profit Factor", "profit_factor", ""), ("Total Trades", "total_trades", ""),
+    ]:
+        v = m.get(key)
+        if v is not None:
+            parts.append(f"  {label}: {v:.2f}{suffix}" if isinstance(v, float) else f"  {label}: {v}{suffix}")
+
+    parts.append(f"\nMQL5 Code ({len(mt5_code)} chars):")
+    parts.append(f"```mql5\n{mt5_preview}\n```")
+
+    result = {
+        "response": "\n".join(parts),
+        "strategy": strategy_dict,
+        "backtest_results": bt_result,
+        "mt5_code": mt5_code,
+    }
 
     sessions[sid]["history"].append({"role": "user", "content": req.message, "timestamp": datetime.now(timezone.utc).isoformat()})
     sessions[sid]["history"].append({"role": "assistant", "content": result.get("response", ""), "timestamp": datetime.now(timezone.utc).isoformat()})
