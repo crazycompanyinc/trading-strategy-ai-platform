@@ -1,521 +1,182 @@
 """
-Trading Strategy AI Platform - Main Application
-FastAPI backend with WebSocket and SSE streaming for real-time agent progress.
+Trading Strategy AI Platform v2 - Main Application
+FastAPI backend + WebSocket. Single unified agent flow.
 """
-import os
-import uuid
-import json
-import asyncio
+import os, json, uuid, asyncio
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from datetime import datetime, timezone
 
-# Load environment from Hermes .env file
-def load_env():
-    """Load environment variables from Hermes .env file."""
-    env_paths = [
-        Path.home() / ".hermes" / ".env",
-        Path(".env"),
-    ]
-    for env_path in env_paths:
-        if env_path.exists():
-            with open(env_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, _, value = line.partition("=")
-                        key = key.strip()
-                        value = value.strip().strip('"').strip("'")
-                        if key and value and key not in os.environ:
-                            os.environ[key] = value
-            print(f"[Config] Loaded env from {env_path}")
-            break
+# Load .env
+for p in [Path.home() / ".hermes" / ".env", Path(".env")]:
+    if p.exists():
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and v and k not in os.environ:
+                    os.environ[k] = v
+        break
 
-load_env()
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 import uvicorn
 
 from agent.trading_agent import TradingAgent
-from agent.swarm_orchestrator import SwarmOrchestrator, AgentRole
 from strategy.parser import StrategyParser
-from strategy.models import StrategyIR
 from backtester.engine import BacktestEngine
 from mutator.genetic import GeneticMutator
 from mt5.generator import MT5Generator
 from reports.generator import ReportGenerator
 
-# ─── App setup ────────────────────────────────────────────────────────────────
-
-app = FastAPI(
-    title="Trading Strategy AI Platform",
-    description="AI-powered trading strategy research via natural language",
-    version="2.0.0"
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ─── Global state ──────────────────────────────────────────────────────────────
+app = FastAPI(title="Trading Strategy AI Platform", version="2.3.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 agent = TradingAgent()
-swarm_orchestrator = SwarmOrchestrator()
 parser = StrategyParser()
 backtester = BacktestEngine()
 mutator = GeneticMutator()
 mt5_gen = MT5Generator()
 report_gen = ReportGenerator()
-
-# Active WebSocket connections
-active_connections: Dict[str, WebSocket] = {}
-
-# Session storage
 sessions: Dict[str, dict] = {}
+active_ws: Dict[str, WebSocket] = {}
 
-# ─── Models ────────────────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
     images: Optional[List[str]] = None
 
-class ChatResponse(BaseModel):
-    session_id: str
-    response: str
-    strategy: Optional[dict] = None
-    backtest_results: Optional[dict] = None
-    mt5_code: Optional[str] = None
-    mutation_results: Optional[dict] = None
-    robustness_results: Optional[dict] = None
-
-class BacktestRequest(BaseModel):
-    strategy: dict
-    symbol: str = "EURUSD"
-    timeframe: str = "H1"
-    start_date: str = "2022-01-01"
-    end_date: str = "2024-01-01"
-    initial_capital: float = 10000.0
-    commission: float = 0.001
-
-class MutationRequest(BaseModel):
-    strategy: dict
-    population_size: int = 20
-    generations: int = 10
-    objectives: List[str] = Field(default=["sharpe", "profit_factor", "total_return"])
-    constraints: Optional[dict] = None
-
-class RobustnessRequest(BaseModel):
-    strategy: dict
-    n_monte_carlo: int = 1000
-    n_walk_forward: int = 5
-    confidence_level: float = 0.95
-
-# ─── REST endpoints ────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "app": "Trading Strategy AI Platform", "version": "2.0.0"}
+    return {"status": "ok", "app": "Trading Strategy AI Platform", "version": "2.3.0"}
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """Process a natural language trading idea with full tool execution."""
-    sid = request.session_id or str(uuid.uuid4())
 
+@app.post("/api/chat")
+async def chat(req: ChatRequest):
+    sid = req.session_id or str(uuid.uuid4())
     if sid not in sessions:
-        sessions[sid] = {
-            "id": sid,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "history": [],
-            "current_strategy": None
-        }
+        sessions[sid] = {"id": sid, "created_at": datetime.now(timezone.utc).isoformat(), "history": [], "current_strategy": None}
 
-    # Process via agent (with real tool execution)
-    result = await agent.process_message(
-        message=request.message,
-        images=request.images or [],
-        session=sid,
-        sessions=sessions
-    )
+    result = await agent.process_message(req.message, req.images or [], sid, sessions)
 
-    sessions[sid]["history"].append({
-        "role": "user",
-        "content": request.message,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    })
-    sessions[sid]["history"].append({
-        "role": "assistant",
-        "content": result.get("response", ""),
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    })
-
+    sessions[sid]["history"].append({"role": "user", "content": req.message, "timestamp": datetime.now(timezone.utc).isoformat()})
+    sessions[sid]["history"].append({"role": "assistant", "content": result.get("response", ""), "timestamp": datetime.now(timezone.utc).isoformat()})
     if result.get("strategy"):
         sessions[sid]["current_strategy"] = result["strategy"]
 
-    return ChatResponse(
-        session_id=sid,
-        response=result.get("response", ""),
-        strategy=result.get("strategy"),
-        backtest_results=result.get("backtest_results"),
-        mt5_code=result.get("mt5_code"),
-        mutation_results=result.get("mutation_results"),
-        robustness_results=result.get("robustness_results"),
-    )
+    return {"session_id": sid, **result}
+
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest):
-    """
-    SSE streaming endpoint for real-time agent progress.
-    Streams swarm state updates as Server-Sent Events.
-    """
-    sid = request.session_id or str(uuid.uuid4())
-
+async def chat_stream(req: ChatRequest):
+    sid = req.session_id or str(uuid.uuid4())
     if sid not in sessions:
-        sessions[sid] = {
-            "id": sid,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "history": [],
-            "current_strategy": None
-        }
+        sessions[sid] = {"id": sid, "created_at": datetime.now(timezone.utc).isoformat(), "history": [], "current_strategy": None}
 
     async def event_stream():
-        # Send initial event
         yield f"data: {json.dumps({'type': 'start', 'session_id': sid})}\n\n"
+        queue = asyncio.Queue()
 
-        async def on_progress(state: dict):
-            """Callback that sends progress updates via SSE."""
-            # This runs inside the swarm — we put events in a queue
-            pass
+        async def on_progress(state):
+            await queue.put(state)
 
-        # Use a queue to bridge sync callback to async SSE
-        progress_queue: asyncio.Queue = asyncio.Queue()
+        # Run agent
+        result = await agent.process_message(req.message, req.images or [], sid, sessions)
 
-        async def queued_progress(state: dict):
-            await progress_queue.put(state)
+        sessions[sid]["history"].append({"role": "user", "content": req.message, "timestamp": datetime.now(timezone.utc).isoformat()})
+        sessions[sid]["history"].append({"role": "assistant", "content": result.get("response", ""), "timestamp": datetime.now(timezone.utc).isoformat()})
 
-        # Run swarm in background
-        swarm_task = asyncio.create_task(
-            swarm_orchestrator.run_swarm(
-                session_id=sid,
-                query=request.message,
-                progress_callback=queued_progress,
-            )
-        )
+        yield f"data: {json.dumps({'type': 'complete', 'session_id': sid, **result})}\n\n"
 
-        # Stream progress updates
-        last_state = None
-        while not swarm_task.done():
-            try:
-                state = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
-                last_state = state
-                yield f"data: {json.dumps({'type': 'progress', 'state': state})}\n\n"
-            except asyncio.TimeoutError:
-                # Send heartbeat
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-                continue
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
 
-        # Drain remaining events
-        while not progress_queue.empty():
-            try:
-                state = progress_queue.get_nowait()
-                last_state = state
-                yield f"data: {json.dumps({'type': 'progress', 'state': state})}\n\n"
-            except asyncio.QueueEmpty:
-                break
-
-        # Get final result
-        try:
-            final_state = await swarm_task
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-            return
-
-        # Save to session
-        sessions[sid]["history"].append({
-            "role": "user",
-            "content": request.message,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
-        sessions[sid]["history"].append({
-            "role": "assistant",
-            "content": final_state.final_response,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
-        if final_state.strategy:
-            sessions[sid]["current_strategy"] = final_state.strategy
-
-        # Send final result
-        final_data = json.dumps({
-            "type": "complete",
-            "session_id": sid,
-            "response": final_state.final_response,
-            "strategy": final_state.strategy,
-            "backtest_results": final_state.backtest_results,
-            "mutation_results": final_state.mutation_results,
-            "robustness_results": final_state.robustness_results,
-            "mt5_code": final_state.mt5_code,
-            "state": final_state.to_dict(),
-        })
-        yield f"data: {final_data}\n\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-@app.post("/api/swarm/run")
-async def run_swarm(request: ChatRequest):
-    """Run the full swarm orchestrator (non-streaming, returns when done)."""
-    sid = request.session_id or str(uuid.uuid4())
-
-    if sid not in sessions:
-        sessions[sid] = {
-            "id": sid,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "history": [],
-            "current_strategy": None
-        }
-
-    state = await swarm_orchestrator.run_swarm(
-        session_id=sid,
-        query=request.message,
-    )
-
-    sessions[sid]["history"].append({
-        "role": "user",
-        "content": request.message,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    })
-    sessions[sid]["history"].append({
-        "role": "assistant",
-        "content": state.final_response,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    })
-    if state.strategy:
-        sessions[sid]["current_strategy"] = state.strategy
-
-    return {
-        "session_id": sid,
-        "response": state.final_response,
-        "strategy": state.strategy,
-        "backtest_results": state.backtest_results,
-        "mutation_results": state.mutation_results,
-        "robustness_results": state.robustness_results,
-        "mt5_code": state.mt5_code,
-        "state": state.to_dict(),
-    }
 
 @app.post("/api/backtest")
-async def run_backtest(request: BacktestRequest):
-    """Execute a backtest for a given strategy."""
+async def run_backtest(req: dict):
     try:
-        result = backtester.run(
-            strategy=request.strategy,
-            symbol=request.symbol,
-            timeframe=request.timeframe,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            initial_capital=request.initial_capital,
-            commission=request.commission
-        )
+        result = backtester.run(strategy=req["strategy"], symbol=req.get("symbol", "EURUSD"),
+                                timeframe=req.get("timeframe", "H1"))
         return {"status": "success", "results": result}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/mutate")
-async def mutate_strategy(request: MutationRequest):
-    """Run genetic mutation to evolve strategy variants."""
+async def run_mutate(req: dict):
     try:
-        results = mutator.evolve(
-            base_strategy=request.strategy,
-            population_size=request.population_size,
-            generations=request.generations,
-            objectives=request.objectives,
-            constraints=request.constraints or {}
-        )
+        results = mutator.evolve(base_strategy=req["strategy"], population_size=req.get("population_size", 15),
+                                 generations=req.get("generations", 5))
         return {"status": "success", "mutations": results}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/api/robustness")
-async def run_robustness(request: RobustnessRequest):
-    """Run robustness tests (Monte Carlo, walk-forward, etc.)."""
-    try:
-        backtester_inst = BacktestEngine()
-        results = backtester_inst.run_robustness_tests(
-            strategy=request.strategy,
-            n_monte_carlo=request.n_monte_carlo,
-            n_walk_forward=request.n_walk_forward,
-            confidence_level=request.confidence_level
-        )
-        return {"status": "success", "results": results}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/export/mt5")
-async def export_mt5(strategy: dict):
-    """Generate MQL5 code from strategy."""
+async def export_mt5(req: dict):
     try:
-        code = mt5_gen.generate(strategy)
+        code = mt5_gen.generate(req.get("strategy", req))
         return {"status": "success", "code": code}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/api/report")
-async def generate_report(backtest_results: dict):
-    """Generate PDF report from backtest results."""
+
+@app.post("/api/robustness")
+async def run_robustness(req: dict):
     try:
-        report_path = report_gen.generate(backtest_results)
-        return {"status": "success", "report_path": report_path}
+        results = backtester.run_robustness_tests(strategy=req["strategy"])
+        return {"status": "success", "results": results}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/api/upload-image")
-async def upload_image(file: UploadFile = File(...)):
-    """Upload an image for analysis."""
-    try:
-        contents = await file.read()
-        img_id = str(uuid.uuid4())
-        img_path = f"/tmp/trading_imgs/{img_id}_{file.filename}"
-        os.makedirs("/tmp/trading_imgs", exist_ok=True)
-        with open(img_path, "wb") as f:
-            f.write(contents)
-        return {"status": "success", "image_id": img_id, "path": img_path}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/api/session/{session_id}")
-async def get_session(session_id: str):
-    """Get session history and current state."""
-    if session_id not in sessions:
+@app.get("/api/session/{sid}")
+async def get_session(sid: str):
+    if sid not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    return sessions[session_id]
+    return sessions[sid]
 
-@app.delete("/api/session/{session_id}")
-async def delete_session(session_id: str):
-    """Delete a session."""
-    if session_id in sessions:
-        del sessions[session_id]
+
+@app.delete("/api/session/{sid}")
+async def delete_session(sid: str):
+    sessions.pop(sid, None)
     return {"status": "deleted"}
 
-# ─── WebSocket endpoint ───────────────────────────────────────────────────────
 
-@app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    await websocket.accept()
-    active_connections[session_id] = websocket
-
-    if session_id not in sessions:
-        sessions[session_id] = {
-            "id": session_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "history": [],
-            "current_strategy": None
-        }
-
+@app.websocket("/ws/{sid}")
+async def ws_endpoint(ws: WebSocket, sid: str):
+    await ws.accept()
+    active_ws[sid] = ws
+    if sid not in sessions:
+        sessions[sid] = {"id": sid, "created_at": datetime.now(timezone.utc).isoformat(), "history": [], "current_strategy": None}
     try:
         while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            msg_type = message.get("type", "chat")
-
+            data = json.loads(await ws.receive_text())
+            msg_type = data.get("type", "chat")
             if msg_type == "chat":
-                # Use the agent with real tool execution
-                result = await agent.process_message(
-                    message=message.get("content", ""),
-                    images=message.get("images", []),
-                    session=session_id,
-                    sessions=sessions
-                )
-                await websocket.send_json({
-                    "type": "response",
-                    "response": result.get("response", ""),
-                    "strategy": result.get("strategy"),
-                    "backtest_results": result.get("backtest_results"),
-                    "mt5_code": result.get("mt5_code"),
-                    "mutation_results": result.get("mutation_results"),
-                    "robustness_results": result.get("robustness_results"),
-                    "done": True
-                })
-
-            elif msg_type == "swarm":
-                # Run full swarm with real-time progress via WebSocket
-                query = message.get("content", "")
-
-                async def ws_progress(state: dict):
-                    await websocket.send_json({
-                        "type": "swarm_progress",
-                        "state": state,
-                    })
-
-                state = await swarm_orchestrator.run_swarm(
-                    session_id=session_id,
-                    query=query,
-                    progress_callback=ws_progress,
-                )
-
-                await websocket.send_json({
-                    "type": "swarm_complete",
-                    "response": state.final_response,
-                    "strategy": state.strategy,
-                    "backtest_results": state.backtest_results,
-                    "mutation_results": state.mutation_results,
-                    "robustness_results": state.robustness_results,
-                    "mt5_code": state.mt5_code,
-                    "state": state.to_dict(),
-                })
-
+                result = await agent.process_message(data.get("content", ""), data.get("images", []), sid, sessions)
+                await ws.send_json({"type": "response", **result})
             elif msg_type == "backtest":
-                bt_result = backtester.run(
-                    strategy=message["strategy"],
-                    symbol=message.get("symbol", "EURUSD"),
-                    timeframe=message.get("timeframe", "H1"),
-                    start_date=message.get("start_date", "2022-01-01"),
-                    end_date=message.get("end_date", "2024-01-01"),
-                    initial_capital=message.get("initial_capital", 10000),
-                    commission=message.get("commission", 0.001)
-                )
-                await websocket.send_json({
-                    "type": "backtest_results",
-                    "results": bt_result
-                })
-
+                r = backtester.run(strategy=data["strategy"], symbol=data.get("symbol", "EURUSD"),
+                                   timeframe=data.get("timeframe", "H1"))
+                await ws.send_json({"type": "backtest_results", "results": r})
             elif msg_type == "mutate":
-                mut_results = mutator.evolve(
-                    base_strategy=message["strategy"],
-                    population_size=message.get("population_size", 20),
-                    generations=message.get("generations", 10),
-                    objectives=message.get("objectives", ["sharpe", "profit_factor"]),
-                    constraints=message.get("constraints", {})
-                )
-                await websocket.send_json({
-                    "type": "mutation_results",
-                    "mutations": mut_results
-                })
-
+                r = mutator.evolve(base_strategy=data["strategy"], population_size=data.get("population_size", 15),
+                                   generations=data.get("generations", 5))
+                await ws.send_json({"type": "mutation_results", "mutations": r})
     except WebSocketDisconnect:
-        if session_id in active_connections:
-            del active_connections[session_id]
+        active_ws.pop(sid, None)
 
-# ─── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys
-    is_reload = "--reload" in sys.argv
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=is_reload, workers=1)
+    uvicorn.run(app, host="0.0.0.0", port=8000, workers=1)
