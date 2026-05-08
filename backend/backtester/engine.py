@@ -434,6 +434,14 @@ class BacktestEngine:
             bar = data[i]
             prev_bar = data[i - 1]
 
+            # Make position info available to condition evaluator
+            if position is not None:
+                bar["_position_bars_held"] = position.get("bars_held", 0)
+                bar["_position_direction"] = position["direction"]
+            else:
+                bar["_position_bars_held"] = 0
+                bar["_position_direction"] = None
+
             # Check stop loss / take profit for existing position
             if position is not None:
                 exit_reason = None
@@ -461,9 +469,17 @@ class BacktestEngine:
 
                 # Check exit signals
                 if exit_reason is None and exit_signals:
-                    if self._check_signals(bar, prev_bar, exit_signals):
-                        exit_price = bar["open"]
-                        exit_reason = "signal"
+                    for sig in exit_signals:
+                        sig_type = sig.get("type", "close_all")
+                        # Check if exit signal applies to current position
+                        if sig_type == "close_long" and position["direction"] != "long":
+                            continue
+                        if sig_type == "close_short" and position["direction"] != "short":
+                            continue
+                        if self._check_single_signal(bar, prev_bar, sig):
+                            exit_price = bar["open"]
+                            exit_reason = "signal"
+                            break
 
                 if exit_reason:
                     trade = Trade(
@@ -510,8 +526,13 @@ class BacktestEngine:
                         "date": bar["date"],
                         "sl": sl,
                         "tp": tp,
+                        "bars_held": 0,
                     }
                     highest_since_entry = entry_price
+
+            # Increment bars_held for existing position
+            if position is not None:
+                position["bars_held"] = position.get("bars_held", 0) + 1
 
             equity_curve.append(round(equity, 2))
 
@@ -530,6 +551,11 @@ class BacktestEngine:
             trades.append(trade)
 
         return trades, equity_curve
+
+    def _check_single_signal(self, bar: dict, prev_bar: dict, signal: dict) -> bool:
+        """Check if a single signal's conditions are met."""
+        condition_group = signal.get("condition", {})
+        return self._evaluate_condition_group(bar, prev_bar, condition_group)
 
     def _check_signals(self, bar: dict, prev_bar: dict, signals: List[dict]) -> bool:
         """Check if any entry signal conditions are met."""
@@ -805,6 +831,10 @@ class BacktestEngine:
             return bar.get("high")
         elif operand == "low":
             return bar.get("low")
+
+        # Position tracking
+        if operand == "position_bars_held":
+            return bar.get("_position_bars_held")
 
         # Indicator values
         if operand in bar:

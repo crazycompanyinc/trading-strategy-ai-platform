@@ -157,6 +157,31 @@ class StrategyParser:
         risk_mgmt = self._extract_risk_management(text_lower)
         name = self._extract_name(text)
 
+        # If no exit signals from explicit keywords, generate defaults
+        if not exit_signals and entry_signals:
+            has_buy = any(s.type == SignalType.BUY for s in entry_signals)
+            has_sell = any(s.type == SignalType.SELL for s in entry_signals)
+            if has_buy:
+                exit_signals.append(Signal(
+                    type=SignalType.CLOSE_LONG,
+                    condition=ConditionGroup(logic="AND", conditions=[
+                        Condition(left_operand="position_bars_held",
+                                  operator=ConditionOperator.GREATER_THAN,
+                                  right_operand="10")
+                    ]),
+                    confidence=0.5,
+                ))
+            if has_sell:
+                exit_signals.append(Signal(
+                    type=SignalType.CLOSE_SHORT,
+                    condition=ConditionGroup(logic="AND", conditions=[
+                        Condition(left_operand="position_bars_held",
+                                  operator=ConditionOperator.GREATER_THAN,
+                                  right_operand="10")
+                    ]),
+                    confidence=0.5,
+                ))
+
         # If we detected ICT concepts but no explicit strategy type, mark as ICT
         if ict_concepts and strategy_type == StrategyType.CUSTOM:
             strategy_type = StrategyType.CUSTOM  # Keep as CUSTOM but with ICT tags
@@ -499,7 +524,6 @@ class StrategyParser:
                             left_operand="ict_fvg_bullish",
                             operator=ConditionOperator.EQUAL,
                             right_operand="true",
-                            indicator_ref="fvg_detector",
                         )
                     ]),
                     confidence=0.6,
@@ -507,66 +531,69 @@ class StrategyParser:
             elif classical_indicators:
                 ind = classical_indicators[0]
                 if ind.type in (IndicatorType.SMA, IndicatorType.EMA):
+                    period = ind.parameters.get("period", 20)
                     signals.append(Signal(
                         type=SignalType.BUY,
                         condition=ConditionGroup(logic="AND", conditions=[
                             Condition(left_operand="close", operator=ConditionOperator.CROSSES_ABOVE,
-                                      right_operand=f"{ind.type.value}({ind.parameters.get('period', 20)})")
+                                      right_operand=f"{ind.type.value}({period})")
                         ]),
                         confidence=0.6,
                     ))
                 elif ind.type == IndicatorType.RSI:
+                    period = ind.parameters.get("period", 14)
+                    oversold = ind.parameters.get("oversold", 30)
                     signals.append(Signal(
                         type=SignalType.BUY,
                         condition=ConditionGroup(logic="AND", conditions=[
-                            Condition(left_operand=f"rsi({ind.parameters.get('period', 14)})",
+                            Condition(left_operand=f"rsi({period})",
                                       operator=ConditionOperator.LESS_THAN,
-                                      right_operand=str(ind.parameters.get("oversold", 30)))
+                                      right_operand=str(oversold))
                         ]),
                         confidence=0.6,
                     ))
 
+        # ── Always ensure we have exit signals ───────────────────────────
+        # (This is a local helper — actual exit signals set in parse())
+        _default_exits = []
+        if signals:
+            has_buy = any(s.type == SignalType.BUY for s in signals)
+            has_sell = any(s.type == SignalType.SELL for s in signals)
+            if has_buy:
+                _default_exits.append(Signal(
+                    type=SignalType.CLOSE_LONG,
+                    condition=ConditionGroup(logic="AND", conditions=[
+                        Condition(left_operand="position_bars_held",
+                                  operator=ConditionOperator.GREATER_THAN,
+                                  right_operand="10")
+                    ]),
+                    confidence=0.5,
+                ))
+            if has_sell:
+                _default_exits.append(Signal(
+                    type=SignalType.CLOSE_SHORT,
+                    condition=ConditionGroup(logic="AND", conditions=[
+                        Condition(left_operand="position_bars_held",
+                                  operator=ConditionOperator.GREATER_THAN,
+                                  right_operand="10")
+                    ]),
+                    confidence=0.5,
+                ))
+
         return signals
 
     def _extract_exit_signals(self, text: str, indicators: List[Indicator]) -> List[Signal]:
+        """Extract exit signals. Returns signals only if explicit exit keywords found."""
         signals = []
-        text_lower = text.lower()
         exit_keywords = ["exit", "close", "salida", "cerrar"]
-        has_exit_keyword = any(kw in text_lower for kw in exit_keywords)
-
-        # ICT-based exit signals: close when opposite FVG is hit or after N bars
-        ict_indicators = [ind for ind in indicators if ind.type == IndicatorType.CUSTOM and "ict_concept" in ind.parameters]
-
-        if ict_indicators:
-            # For FVG strategies: close long when bearish FVG appears
-            fvg_indicators = [ict for ict in ict_indicators if "fvg" in ict.parameters.get("ict_concept", "")]
-            if fvg_indicators:
-                signals.append(Signal(
-                    type=SignalType.CLOSE_ALL,
-                    condition=ConditionGroup(logic="OR", conditions=[
-                        Condition(
-                            left_operand="ict_fvg_bearish",
-                            operator=ConditionOperator.EQUAL,
-                            right_operand="true",
-                        ),
-                        Condition(
-                            left_operand="ict_fvg_bullish",
-                            operator=ConditionOperator.EQUAL,
-                            right_operand="true",
-                        ),
-                    ]),
-                    confidence=0.6,
-                ))
-
-        if has_exit_keyword:
-            conditions = self._build_conditions_from_indicators(text_lower, indicators, "exit")
+        if any(kw in text for kw in exit_keywords):
+            conditions = self._build_conditions_from_indicators(text, indicators, "exit")
             if conditions:
                 signals.append(Signal(
                     type=SignalType.CLOSE_ALL,
                     condition=ConditionGroup(logic="OR", conditions=conditions),
                     confidence=0.7,
                 ))
-
         return signals
 
     def _build_conditions_from_indicators(self, text: str, indicators: List[Indicator],
