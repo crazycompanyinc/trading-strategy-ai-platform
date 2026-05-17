@@ -178,3 +178,11 @@ Cuando termines una tarea, avisa a ROTATRON para recibir prompts de continuació
 1. **Al finalizar**: Incluye en tu informe "Listo para ROTATRON"
 2. **Estado claro**: Indica qué se hizo y qué sigue
 3. **Contexto completo**: ROTATRON necesita saber el estado exacto para continuar
+
+
+## 🔄 INTEGRACIÓN CON ROTATRON
+
+Cuando termines una tarea, avisa a ROTATRON para recibir prompts de continuación:
+1. **Al finalizar**: Incluye en tu informe "Listo para ROTATRON"
+2. **Estado claro**: Indica qué se hizo y qué sigue
+3. **Contexto completo**: ROTATRON necesita saber el estado exacto para continuar
